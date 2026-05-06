@@ -1,5 +1,5 @@
 import { config } from "../../package.json";
-import { t } from "../utils/i18n";
+import { t, setLocale } from "../utils/i18n";
 import { WEBCHAT_TARGETS } from "../webchat/types";
 import {
   DEFAULT_MAX_TOKENS,
@@ -650,6 +650,14 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       'option[value="auto"]',
     ) as HTMLOptionElement | null;
     if (autoOption) autoOption.textContent = t("Auto (follow Zotero)");
+    const enOption = localeSelectEl.querySelector(
+      'option[value="en-US"]',
+    ) as HTMLOptionElement | null;
+    if (enOption) enOption.textContent = t("English");
+    const zhOption = localeSelectEl.querySelector(
+      'option[value="zh-CN"]',
+    ) as HTMLOptionElement | null;
+    if (zhOption) zhOption.textContent = t("中文 (简体)");
   }
   // Translate restart hint
   const restartHint = doc.querySelector(
@@ -3496,9 +3504,15 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       (Zotero.Prefs.get(`${prefsPrefix}.locale`, true) as string) || "auto";
     localeSelect.value = currentLocale;
     localeSelect.addEventListener("change", () => {
-      Zotero.Prefs.set(`${prefsPrefix}.locale`, localeSelect.value, true);
+      // Use the new runtime locale switch
+      setLocale(localeSelect.value);
+      // Optionally, you can still show a hint for clarity
       if (localeRestartHint) {
-        localeRestartHint.style.display = "block";
+        localeRestartHint.style.display = "none"; // No need for restart
+      }
+      // Re-translate the preferences page
+      if (doc.defaultView) {
+        registerPrefsScripts(doc.defaultView);
       }
     });
   }

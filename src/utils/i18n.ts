@@ -376,12 +376,15 @@ const zhCN: Record<string, string> = {
   // ── Language setting ────────────────────────────────────────────────────
   "Language": "语言",
   "Auto (follow Zotero)": "自动（跟随 Zotero）",
+  "English": "English",
+  "中文 (简体)": "中文 (简体)",
   "Restart Zotero to apply language change.": "重启 Zotero 以应用语言更改。",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────
 
 let currentLocale: string = "auto";
+let localeChangeListeners: Array<() => void> = [];
 
 /**
  * Initialize i18n — call once at plugin startup.
@@ -396,6 +399,38 @@ export function initI18n(): void {
   } catch {
     currentLocale = "auto";
   }
+}
+
+/**
+ * Set the locale at runtime and notify listeners.
+ */
+export function setLocale(locale: string): void {
+  currentLocale = locale;
+  try {
+    Zotero.Prefs.set(
+      "extensions.zotero.llmforzotero.locale",
+      locale,
+      true,
+    );
+  } catch {
+    // Ignore pref setting errors
+  }
+  // Notify all listeners
+  localeChangeListeners.forEach(listener => listener());
+}
+
+/**
+ * Register a listener to be called when locale changes.
+ */
+export function onLocaleChange(listener: () => void): () => void {
+  localeChangeListeners.push(listener);
+  // Return an unsubscribe function
+  return () => {
+    const index = localeChangeListeners.indexOf(listener);
+    if (index > -1) {
+      localeChangeListeners.splice(index, 1);
+    }
+  };
 }
 
 function getEffectiveLocale(): string {
