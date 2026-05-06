@@ -8109,12 +8109,12 @@ export function setupHandlers(
     // Clear button → "Exit" in webchat, restore "Clear" otherwise
     if (clearBtn) {
       if (isWebChat) {
-        clearBtn.textContent = "Exit";
+        clearBtn.textContent = t("Exit");
         (clearBtn as HTMLButtonElement).disabled = false;
         clearBtn.style.opacity = "";
-        clearBtn.title = "Exit webchat and return to previous model";
+        clearBtn.title = t("Exit webchat and return to previous model");
       } else {
-        clearBtn.textContent = "Clear";
+        clearBtn.textContent = t("Clear");
         clearBtn.title = "";
       }
     }
@@ -8193,7 +8193,7 @@ export function setupHandlers(
     // Section header
     const header = createElement(doc, "div", "llm-history-menu-section-block", {});
     const title = createElement(doc, "div", "llm-history-menu-section", {
-      textContent: "WebChat Conversations",
+      textContent: t("WebChat Conversations"),
     });
     title.style.padding = "6px 10px";
     title.style.fontSize = "10px";

@@ -379,6 +379,51 @@ const zhCN: Record<string, string> = {
   "English": "English",
   "中文 (简体)": "中文 (简体)",
   "Restart Zotero to apply language change.": "重启 Zotero 以应用语言更改。",
+
+  // ── WebChat preload screen ─────────────────────────────────────────────
+  "Connecting to ChatGPT…": "正在连接 ChatGPT…",
+  "Connecting to WebChat…": "正在连接 WebChat…",
+  "Relay server": "中继服务器",
+  "Extension connection": "扩展连接",
+  "Chat site tab": "聊天网站标签页",
+  "Zotero relay server is not available.": "Zotero 中继服务器不可用。",
+  "Install the Sync for Zotero Chrome extension and reload the page.": "安装 Sync for Zotero Chrome 扩展并重新加载页面。",
+  "Ready! Starting webchat…": "就绪！正在启动 WebChat…",
+  "Retry": "重试",
+
+  // ── WebChat and modes ─────────────────────────────────────────────────
+  "Exit": "退出",
+  "Exit webchat and return to previous model": "退出 WebChat 并返回之前的模型",
+  "Claude Code": "Claude Code",
+  "Switch to Claude Code mode": "切换到 Claude Code 模式",
+  "Switch to WebChat mode": "切换到 WebChat 模式",
+  "Disable Codex App Server first to switch on Claude Code.": "请先禁用 Codex App Server 再切换到 Claude Code。",
+  "Disable Claude Code first to switch on Codex App Server.": "请先禁用 Claude Code 再切换到 Codex App Server。",
+  "Global defaults shared across Claude Code on this machine.": "此机器上 Claude Code 共享的全局默认设置。",
+  "Claude Code Chat": "Claude Code 聊天",
+  "Claude Code Paper Chat": "Claude Code 论文聊天",
+  "Claude Code in Zotero": "Zotero 中的 Claude Code",
+  "Claude Code project skill": "Claude Code 项目技能",
+  "Claude Code slash command: /": "Claude Code 斜杠命令：/",
+
+  // ── UI elements ───────────────────────────────────────────────────────
+  "Open in Window": "在窗口中打开",
+  "Open chat in a standalone window": "在独立窗口中打开聊天",
+  "Edit": "编辑",
+  "Delete": "删除",
+  "Add": "添加",
+  "Move": "移动",
+  "Reset": "重置",
+  "Slash commands": "斜杠命令",
+  "Model: ...": "模型：...",
+
+  // ── Chat site dynamic strings ─────────────────────────────────────────
+  "Open in your Chrome browser.": "在你的 Chrome 浏览器中打开。",
+  "Open the corresponding chat site in your Chrome browser.": "在你的 Chrome 浏览器中打开对应的聊天网站。",
+
+  // ── History menu ──────────────────────────────────────────────────────
+  "WebChat Conversations": "WebChat 对话历史",
+  "No conversations yet": "暂无对话",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────
