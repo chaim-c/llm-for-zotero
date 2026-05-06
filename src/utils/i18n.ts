@@ -424,29 +424,6 @@ const zhCN: Record<string, string> = {
   // ── History menu ──────────────────────────────────────────────────────
   "WebChat Conversations": "WebChat 对话历史",
   "No conversations yet": "暂无对话",
-
-  // ── Agent action progress ────────────────────────────────────────────
-  "Starting…": "正在启动…",
-  "Add Text": "添加文本",
-  "Library chat": "文献库对话",
-  "Paper chat": "论文对话",
-  "Cancel (Esc)": "取消 (Esc)",
-  "Editing": "编辑中",
-  "Thinking": "思考中",
-  "Summary": "摘要",
-  "Details": "详细信息",
-  "No retryable response found": "没有可重试的响应",
-  "Before": "之前",
-  "After": "之后",
-  "Select all": "全选",
-  "Clear all": "清除全部",
-  "Move to": "移动到",
-  "Suggested tags": "建议标签",
-  "Add tag": "添加标签",
-  "Open ↗": "打开 ↗",
-  "Sort:": "排序：",
-  "Loading…": "加载中…",
-  "Loading agent activity...": "加载 Agent 活动中…",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────
