@@ -8971,7 +8971,7 @@ export function setupHandlers(
 
       const step = ownerDoc.createElement("div");
       step.className = "llm-action-progress-step";
-      step.textContent = "Starting…";
+      step.textContent = t("Starting…");
       wrapper.appendChild(step);
       stepText = step;
 
@@ -9770,7 +9770,7 @@ export function setupHandlers(
       if (filtered.length) {
         const section = mkAgentEl("div", "llm-slash-menu-section");
         section.setAttribute("aria-hidden", "true");
-        section.textContent = "Claude Code";
+        section.textContent = t("Claude Code");
         list.insertBefore(section, firstBase);
         filtered.forEach((command) => {
           const btn = mkAgentEl("button", "llm-action-picker-item") as HTMLButtonElement;

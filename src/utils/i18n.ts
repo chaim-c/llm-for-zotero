@@ -424,6 +424,9 @@ const zhCN: Record<string, string> = {
   // ── History menu ──────────────────────────────────────────────────────
   "WebChat Conversations": "WebChat 对话历史",
   "No conversations yet": "暂无对话",
+
+  // ── Agent action progress ────────────────────────────────────────────
+  "Starting…": "正在启动…",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────
