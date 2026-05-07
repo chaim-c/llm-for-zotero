@@ -703,6 +703,70 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     agentBridgeUrlInputLocal.placeholder = t(agentBridgeUrlInputLocal.placeholder);
   }
 
+  // Translate Agent Mode (Beta) section
+  const agentModeLabel = Array.from(doc.querySelectorAll('label') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.includes('Enable Agent Mode')
+  ) as HTMLElement | null;
+  if (agentModeLabel) {
+    agentModeLabel.textContent = t('Enable Agent Mode (Beta)');
+  }
+  const agentModeHint = Array.from(doc.querySelectorAll('span') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.includes('Shows the "Agent (beta)" toggle')
+  ) as HTMLElement | null;
+  if (agentModeHint) {
+    agentModeHint.textContent = t('Shows the "Agent (beta)" toggle in the context bar, enabling the agentic multi-step assistant. Off by default — enable only if you want to experiment with the beta feature.');
+  }
+
+  // Translate Codex App Server section
+  const codexAppServerTitle = Array.from(doc.querySelectorAll('span') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.trim() === 'Codex App Server'
+  ) as HTMLElement | null;
+  // (Keep Codex App Server as is - brand name)
+  const codexAppServerDesc = Array.from(doc.querySelectorAll('span') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.includes('First-class Codex runtime integration')
+  ) as HTMLElement | null;
+  if (codexAppServerDesc) {
+    codexAppServerDesc.textContent = t('First-class Codex runtime integration. Run codex login before enabling it; Zotero keeps local tool approvals in its own confirmation cards.');
+  }
+  const codexAppServerEnableLabel = Array.from(doc.querySelectorAll('label') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.includes('Enable Codex App Server integration')
+  ) as HTMLElement | null;
+  if (codexAppServerEnableLabel) {
+    codexAppServerEnableLabel.textContent = t('Enable Codex App Server integration');
+  }
+  const codexAppServerEnableDesc = Array.from(doc.querySelectorAll('span') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.includes('When enabled, Zotero shows the Codex button')
+  ) as HTMLElement | null;
+  if (codexAppServerEnableDesc) {
+    codexAppServerEnableDesc.textContent = t('When enabled, Zotero shows the Codex button in the chat header so you can switch between upstream chat and Codex.');
+  }
+  // codexAppServerEnableSelect is declared later, so translate it there or later
+
+  const codexAppServerRuntimeDefaults = Array.from(doc.querySelectorAll('span') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.trim() === 'Runtime defaults'
+  ) as HTMLElement | null;
+  if (codexAppServerRuntimeDefaults) {
+    codexAppServerRuntimeDefaults.textContent = t('Runtime defaults');
+  }
+  const codexAppServerRuntimeDesc = Array.from(doc.querySelectorAll('span') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.includes('These values control how Codex runs')
+  ) as HTMLElement | null;
+  if (codexAppServerRuntimeDesc) {
+    codexAppServerRuntimeDesc.textContent = t('These values control how Codex runs inside Zotero by default.');
+  }
+  const codexAppServerModelLabel = Array.from(doc.querySelectorAll('label') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.trim() === 'Model'
+  ) as HTMLElement | null;
+  if (codexAppServerModelLabel) {
+    codexAppServerModelLabel.textContent = t('Model');
+  }
+  const codexAppServerReasoningLabel = Array.from(doc.querySelectorAll('label') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.trim() === 'Reasoning'
+  ) as HTMLElement | null;
+  if (codexAppServerReasoningLabel) {
+    codexAppServerReasoningLabel.textContent = t('Reasoning');
+  }
+
   // ── Tab bar switching ───────────────────────────────────────────
   const tabBar = doc.querySelector(
     `#${config.addonRef}-pref-tab-bar`,
@@ -763,6 +827,13 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const codexAppServerEnableSelect = doc.querySelector(
     `#${config.addonRef}-codex-app-server-enable`,
   ) as HTMLSelectElement | null;
+  // Translate Codex App Server enable select options
+  if (codexAppServerEnableSelect) {
+    const offOption = codexAppServerEnableSelect.querySelector('option[value="disabled"]');
+    if (offOption) offOption.textContent = t('Off');
+    const onOption = codexAppServerEnableSelect.querySelector('option[value="enabled"]');
+    if (onOption) onOption.textContent = t('On');
+  }
   const codexAppServerSettingsWrap = doc.querySelector(
     `#${config.addonRef}-codex-app-server-settings`,
   ) as HTMLDivElement | null;
@@ -772,6 +843,19 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const codexAppServerReasoningSelect = doc.querySelector(
     `#${config.addonRef}-codex-app-server-reasoning`,
   ) as HTMLSelectElement | null;
+  // Translate Codex App Server reasoning select options
+  if (codexAppServerReasoningSelect) {
+    const autoOpt = codexAppServerReasoningSelect.querySelector('option[value="auto"]');
+    if (autoOpt) autoOpt.textContent = t('Auto');
+    const lowOpt = codexAppServerReasoningSelect.querySelector('option[value="low"]');
+    if (lowOpt) lowOpt.textContent = t('Low');
+    const medOpt = codexAppServerReasoningSelect.querySelector('option[value="medium"]');
+    if (medOpt) medOpt.textContent = t('Medium');
+    const highOpt = codexAppServerReasoningSelect.querySelector('option[value="high"]');
+    if (highOpt) highOpt.textContent = t('High');
+    const xhighOpt = codexAppServerReasoningSelect.querySelector('option[value="xhigh"]');
+    if (xhighOpt) xhighOpt.textContent = t('XHigh');
+  }
   const codexAppServerTestBtn = doc.querySelector(
     `#${config.addonRef}-codex-app-server-test`,
   ) as HTMLButtonElement | null;
