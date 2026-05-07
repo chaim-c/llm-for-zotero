@@ -775,6 +775,22 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     notesDirectoryDesc.textContent = t('Configure a local directory for saving notes as files. Note format and templates are managed through skills — type `/` in chat to see available skills, or edit skill files directly.');
   }
 
+  // Translate Test Write Access button
+  const testWriteAccessBtn = Array.from(doc.querySelectorAll('button') as unknown as HTMLButtonElement[]).find(
+    (el: HTMLButtonElement) => el.textContent?.trim() === 'Test Write Access'
+  ) as HTMLButtonElement | null;
+  if (testWriteAccessBtn) {
+    testWriteAccessBtn.textContent = t('Test Write Access');
+  }
+
+  // Translate Sync existing MinerU caches now button
+  const syncMinerUCachesBtn = Array.from(doc.querySelectorAll('button') as unknown as HTMLButtonElement[]).find(
+    (el: HTMLButtonElement) => el.textContent?.trim() === 'Sync existing MinerU caches now'
+  ) as HTMLButtonElement | null;
+  if (syncMinerUCachesBtn) {
+    syncMinerUCachesBtn.textContent = t('Sync existing MinerU caches now');
+  }
+
   // ── Tab bar switching ───────────────────────────────────────────
   const tabBar = doc.querySelector(
     `#${config.addonRef}-pref-tab-bar`,

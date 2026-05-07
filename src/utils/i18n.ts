@@ -314,6 +314,7 @@ const zhCN: Record<string, string> = {
   "Subfolder for copied figures and images (e.g., assets, attachments)": "用于存放复制的图片和附件的子文件夹（如 assets、attachments）",
   "Test Write Access": "测试写入权限",
   "Write access verified": "✓ 写入权限已验证",
+  "Sync existing MinerU caches now": "立即同步现有的 MinerU 缓存",
   "Enter a vault path first": "请先输入知识库路径",
   "Each provider has an auth mode, API URL, and one or more model variants.": "每个服务商有一个认证模式、API URL 和一个或多个模型变体。",
   "Choose a preset above, or switch to Customized to enter a full base URL or endpoint manually.": '选择上方的预设，或切换到"自定义"以手动输入完整的基础 URL 或端点。',
