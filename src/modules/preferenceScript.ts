@@ -767,6 +767,14 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     codexAppServerReasoningLabel.textContent = t('Reasoning');
   }
 
+  // Translate Notes Directory description
+  const notesDirectoryDesc = Array.from(doc.querySelectorAll('span') as unknown as HTMLElement[]).find(
+    (el: HTMLElement) => el.textContent?.includes('Configure a local directory for saving notes')
+  ) as HTMLElement | null;
+  if (notesDirectoryDesc) {
+    notesDirectoryDesc.textContent = t('Configure a local directory for saving notes as files. Note format and templates are managed through skills — type `/` in chat to see available skills, or edit skill files directly.');
+  }
+
   // ── Tab bar switching ───────────────────────────────────────────
   const tabBar = doc.querySelector(
     `#${config.addonRef}-pref-tab-bar`,
