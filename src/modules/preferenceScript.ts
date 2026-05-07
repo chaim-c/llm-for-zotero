@@ -568,9 +568,20 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const normalizeWs = (s: string): string => s.replace(/\s+/g, " ").trim();
 
   const translateTextNodes = (container: Element) => {
-    const elements = container.querySelectorAll("label, span, div, summary");
+    const elements = container.querySelectorAll("label, span, div, summary, option");
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i] as HTMLElement;
+      // For option elements (simple text)
+      if (el.tagName.toLowerCase() === "option") {
+        const text = normalizeWs(el.textContent || "");
+        if (text) {
+          const translated = t(text);
+          if (translated !== text) {
+            el.textContent = translated;
+          }
+        }
+        continue;
+      }
       // For labels with inputs, translate the text node after the input
       if (el.tagName.toLowerCase() === "label" && el.querySelector("input")) {
         for (const child of Array.from(el.childNodes)) {
@@ -665,6 +676,32 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   ) as HTMLElement | null;
   if (restartHint)
     restartHint.textContent = t("Restart Zotero to apply language change.");
+
+  // Translate Codex App Server and Claude Code buttons and inputs
+  const codexTestBtn = doc.querySelector(
+    `#${config.addonRef}-codex-app-server-test`,
+  ) as HTMLButtonElement | null;
+  if (codexTestBtn) {
+    codexTestBtn.textContent = t("Test connection");
+  }
+  const codexMcpSetupBtn = doc.querySelector(
+    `#${config.addonRef}-codex-app-server-mcp-setup`,
+  ) as HTMLButtonElement | null;
+  if (codexMcpSetupBtn) {
+    codexMcpSetupBtn.textContent = t("Install/update Zotero MCP config");
+  }
+  const codexModelInput = doc.querySelector(
+    `#${config.addonRef}-codex-app-server-model`,
+  ) as HTMLInputElement | null;
+  if (codexModelInput?.placeholder) {
+    codexModelInput.placeholder = t(codexModelInput.placeholder);
+  }
+  const agentBridgeUrlInputLocal = doc.querySelector(
+    `#${config.addonRef}-agent-bridge-url`,
+  ) as HTMLInputElement | null;
+  if (agentBridgeUrlInputLocal?.placeholder) {
+    agentBridgeUrlInputLocal.placeholder = t(agentBridgeUrlInputLocal.placeholder);
+  }
 
   // ── Tab bar switching ───────────────────────────────────────────
   const tabBar = doc.querySelector(

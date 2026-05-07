@@ -424,6 +424,49 @@ const zhCN: Record<string, string> = {
   // ── History menu ──────────────────────────────────────────────────────
   "WebChat Conversations": "WebChat 对话历史",
   "No conversations yet": "暂无对话",
+
+  // ── Codex App Server (Agent tab) ────────────────────────────────────────
+  "First-class Codex runtime integration. Run codex login before enabling it; Zotero keeps local tool approvals in its own confirmation cards.": "一流的 Codex 运行时集成。启用前请先运行 codex login；Zotero 会在自己的确认卡片中保存本地工具审批。",
+  "Enable Codex App Server integration": "启用 Codex App Server 集成",
+  "When enabled, Zotero shows the Codex button in the chat header so you can switch between upstream chat and Codex.": "启用后，Zotero 会在聊天标题栏显示 Codex 按钮，以便你在官方聊天和 Codex 之间切换。",
+  "Off": "关闭",
+  "On": "开启",
+  "Runtime defaults": "运行时默认值",
+  "These values control how Codex runs inside Zotero by default.": "这些值控制 Codex 在 Zotero 内的默认运行方式。",
+  "Low": "低",
+  "Medium": "中",
+  "High": "高",
+  "XHigh": "极高",
+  "Enter a Codex app-server model ID, for example gpt-5.4, gpt-5.3-codex, or gpt-5.2-codex. Use the model name accepted by your installed Codex CLI.": "输入 Codex 应用服务器模型 ID，例如 gpt-5.4、gpt-5.3-codex 或 gpt-5.2-codex。使用你安装的 Codex CLI 接受的模型名称。",
+  "Test connection": "测试连接",
+  "Zotero MCP tools": "Zotero MCP 工具",
+  "Lets native Codex use a curated local MCP server for Zotero library and PDF reading. Write and destructive tools are not exposed in this mode.": "让原生 Codex 使用一个精心策划的本地 MCP 服务器来访问 Zotero 库和 PDF 阅读。写入和破坏性工具在此模式下不暴露。",
+  "Enable Zotero MCP tools for native Codex turns": "为原生 Codex 对话启用 Zotero MCP 工具",
+  "Install/update Zotero MCP config": "安装/更新 Zotero MCP 配置",
+  "Zotero writes a local bearer-token protected MCP entry into Codex config and asks app-server to reload MCP servers. User-level Codex skills, plugins, and other MCP setup remain owned by Codex.": "Zotero 将一个受本地令牌保护的 MCP 条目写入 Codex 配置，并要求应用服务器重新加载 MCP 服务器。用户级 Codex 技能、插件和其他 MCP 设置仍由 Codex 拥有。",
+
+  // ── Claude Code Integration (Agent tab) ──────────────────────────────────
+  "Claude Code Integration": "Claude Code 集成",
+  "This panel configures the embedded Claude runtime. You enter Claude Code mode from the chat header, not from settings.": "此面板配置嵌入式 Claude 运行时。你从聊天标题栏进入 Claude Code 模式，而不是从设置中。",
+  "Enable Claude Code integration": "启用 Claude Code 集成",
+  "When enabled, Zotero shows the Claude button in the chat header so you can switch between upstream chat and Claude Code.": "启用后，Zotero 会在聊天标题栏显示 Claude 按钮，以便你在官方聊天和 Claude Code 之间切换。",
+  "Connection": "连接",
+  "Zotero sends Claude requests to this local bridge service.": "Zotero 将 Claude 请求发送到此本地桥接服务。",
+  "Bridge URL": "桥接 URL",
+  "Config source": "配置源",
+  "Choose where Claude should load its settings from. Most users should keep default.": "选择 Claude 应从何处加载其设置。大多数用户应保持 default。",
+  "Claude Config Source": "Claude 配置源",
+  "default — user + project + local": "default — 用户 + 项目 + 本地",
+  "user-only — only your global Claude config": "user-only — 仅你的全局 Claude 配置",
+  "zotero-only — only Zotero-managed configs": "zotero-only — 仅 Zotero 管理的配置",
+  "Show config locations and advanced details": "显示配置位置和高级详细信息",
+  "default loads user + project + local. Priority: local > project > user.": "default 加载用户 + 项目 + 本地。优先级：本地 > 项目 > 用户。",
+  "user-only loads only your machine-wide Claude settings.": "user-only 仅加载你的机器级 Claude 设置。",
+  "zotero-only loads only Zotero-managed shared and per-conversation settings.": "zotero-only 仅加载 Zotero 管理的共享设置和每对话设置。",
+
+  // ── Input placeholders ───────────────────────────────────────────────
+  "gpt-5.4": "gpt-5.4",
+  "http://127.0.0.1:19787": "http://127.0.0.1:19787",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────
