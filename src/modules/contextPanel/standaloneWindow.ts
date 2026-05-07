@@ -729,7 +729,7 @@ export function openStandaloneChat(options?: {
       ) as HTMLButtonElement;
       openTab.className = "llm-standalone-tab";
       openTab.type = "button";
-      openTab.textContent = "Library chat";
+      openTab.textContent = t("Library chat");
       openTab.dataset.tab = "open";
 
       paperTab.classList.toggle("active", standaloneMode === "paper");
@@ -1513,12 +1513,12 @@ export function openStandaloneChat(options?: {
           try {
             const title =
               (currentBasePaperItem as any).getField?.("title") || "";
-            contentTitleText.textContent = title || "Paper chat";
+            contentTitleText.textContent = title || t("Paper chat");
           } catch {
-            contentTitleText.textContent = "Paper chat";
+            contentTitleText.textContent = t("Paper chat");
           }
         } else {
-          contentTitleText.textContent = "Library chat";
+          contentTitleText.textContent = t("Library chat");
         }
       };
 

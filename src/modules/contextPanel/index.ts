@@ -23,6 +23,7 @@
  */
 
 import { getLocaleID } from "../../utils/locale";
+import { t } from "../../utils/i18n";
 import { config, PANE_ID } from "./constants";
 import type { Message } from "./types";
 import type { ConversationSystem } from "../../shared/types";
@@ -753,7 +754,7 @@ export function registerReaderSelectionTracking() {
             "button",
           ) as HTMLButtonElement;
           addTextBtn.type = "button";
-          addTextBtn.textContent = "Add Text";
+          addTextBtn.textContent = t("Add Text");
           addTextBtn.title = "Add selected text to LLM panel";
           addTextBtn.style.cssText = [
             "display:block",

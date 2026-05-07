@@ -5,6 +5,7 @@ import {
   getStandaloneLibraryChatStartPageHtml,
   getPaperChatStartPageHtml,
   getNoteEditingStartPageHtml,
+  t,
 } from "../../utils/i18n";
 import {
   appendMessage as appendStoredMessage,
@@ -5922,11 +5923,11 @@ function buildInlineEditWidget(
   header.className = "llm-inline-edit-header";
   const headerLabel = doc.createElement("span") as HTMLSpanElement;
   headerLabel.className = "llm-inline-edit-header-label";
-  headerLabel.textContent = "Editing";
+  headerLabel.textContent = t("Editing");
   const cancelBtn = doc.createElement("button") as HTMLButtonElement;
   cancelBtn.type = "button";
   cancelBtn.className = "llm-inline-edit-header-cancel";
-  cancelBtn.textContent = "Cancel";
+  cancelBtn.textContent = t("Cancel");
   cancelBtn.addEventListener("mousedown", (e: Event) => {
     (e as MouseEvent).preventDefault();
     (e as MouseEvent).stopPropagation();
@@ -6910,7 +6911,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
 
         const summary = doc.createElement("summary") as HTMLElement;
         summary.className = "llm-agent-reasoning-summary";
-        summary.textContent = "Thinking";
+        summary.textContent = t("Thinking");
         const toggleReasoning = (e: Event) => {
           e.preventDefault();
           e.stopPropagation();
@@ -6941,7 +6942,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           summaryBlock.className = "llm-agent-reasoning-block";
           const label = doc.createElement("div") as HTMLDivElement;
           label.className = "llm-agent-reasoning-label";
-          label.textContent = "Summary";
+          label.textContent = t("Summary");
           const text = doc.createElement("div") as HTMLDivElement;
           text.className = "llm-agent-reasoning-text";
           try {
@@ -6960,7 +6961,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           detailsBlock.className = "llm-agent-reasoning-block";
           const label = doc.createElement("div") as HTMLDivElement;
           label.className = "llm-agent-reasoning-label";
-          label.textContent = "Details";
+          label.textContent = t("Details");
           const text = doc.createElement("div") as HTMLDivElement;
           text.className = "llm-agent-reasoning-text";
           try {

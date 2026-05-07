@@ -2857,7 +2857,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         notesDirTestBtn.disabled = true;
         notesDirTestStatus.style.display = "inline";
         notesDirTestStatus.style.color = "var(--fill-secondary, #888)";
-        notesDirTestStatus.textContent = "Testing...";
+        notesDirTestStatus.textContent = t("Testing...");
 
         try {
           const IOUtils = (globalThis as any).IOUtils;

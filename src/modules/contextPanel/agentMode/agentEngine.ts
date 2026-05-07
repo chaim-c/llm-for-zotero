@@ -88,6 +88,7 @@ import type { ChatMessage } from "../../../utils/llmClient";
 import type { StoredChatMessage } from "../../../utils/chatStore";
 import type { Message } from "../types";
 import { isClaudeBlockStreamingEnabled } from "../../../claudeCode/prefs";
+import { t } from "../../../utils/i18n";
 
 function shouldSyncVisibleRollbackText(message: Message): boolean {
   return (
@@ -1202,7 +1203,7 @@ export async function retryAgentTurn(
   if (!retryPair) {
     if (ui.status) {
       // Best-effort status update without full createPanelUpdateHelpers
-      ui.status.textContent = "No retryable response found";
+      ui.status.textContent = t("No retryable response found");
     }
     return;
   }

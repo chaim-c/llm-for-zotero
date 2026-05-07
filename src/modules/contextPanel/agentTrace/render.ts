@@ -18,6 +18,7 @@ import {
 } from "../normalizers";
 import { agentReasoningExpandedCache } from "../agentState";
 import { buildTextDiffPreview } from "./diffPreview";
+import { t } from "../../../utils/i18n";
 
 type AgentTraceSummaryKind = "plan" | "tool" | "ok" | "skip" | "done";
 
@@ -232,7 +233,7 @@ function renderReviewTableField(
     beforeCol.className = "llm-agent-hitl-review-column";
     const beforeLabel = doc.createElement("div");
     beforeLabel.className = "llm-agent-hitl-review-column-label";
-    beforeLabel.textContent = "Before";
+    beforeLabel.textContent = t("Before");
     beforeCol.append(
       beforeLabel,
       renderReviewValueCell(doc, item.before || "", !!item.multiline, "before"),
@@ -247,7 +248,7 @@ function renderReviewTableField(
     afterCol.className = "llm-agent-hitl-review-column";
     const afterLabel = doc.createElement("div");
     afterLabel.className = "llm-agent-hitl-review-column-label";
-    afterLabel.textContent = "After";
+    afterLabel.textContent = t("After");
     afterCol.append(
       afterLabel,
       renderReviewValueCell(doc, item.after || "", !!item.multiline, "after"),
@@ -393,13 +394,13 @@ function renderChecklistField(
   const selectAllButton = doc.createElement("button");
   selectAllButton.type = "button";
   selectAllButton.className = "llm-agent-hitl-btn llm-agent-hitl-btn-alt";
-  selectAllButton.textContent = "Select all";
+  selectAllButton.textContent = t("Select all");
   toolbar.appendChild(selectAllButton);
 
   const clearAllButton = doc.createElement("button");
   clearAllButton.type = "button";
   clearAllButton.className = "llm-agent-hitl-btn llm-agent-hitl-btn-secondary";
-  clearAllButton.textContent = "Clear all";
+  clearAllButton.textContent = t("Clear all");
   toolbar.appendChild(clearAllButton);
 
   wrap.appendChild(toolbar);
@@ -542,7 +543,7 @@ function renderAssignmentTableField(
 
     const selectLabel = doc.createElement("div");
     selectLabel.className = "llm-agent-hitl-assignment-select-label";
-    selectLabel.textContent = "Move to";
+    selectLabel.textContent = t("Move to");
     control.appendChild(selectLabel);
 
     const select = doc.createElement("select");
@@ -667,7 +668,7 @@ function renderTagAssignmentTableField(
 
     const inputLabel = doc.createElement("div");
     inputLabel.className = "llm-agent-hitl-assignment-select-label";
-    inputLabel.textContent = "Suggested tags";
+    inputLabel.textContent = t("Suggested tags");
     control.appendChild(inputLabel);
 
     const editor = doc.createElement("div");
@@ -680,7 +681,7 @@ function renderTagAssignmentTableField(
     const addButton = doc.createElement("button");
     addButton.type = "button";
     addButton.className = "llm-agent-hitl-tag-add";
-    addButton.textContent = "Add tag";
+    addButton.textContent = t("Add tag");
     editor.appendChild(addButton);
 
     const chipInputs: HTMLInputElement[] = [];
@@ -869,7 +870,7 @@ function renderResultCardList(
     if (card.href) {
       const openBtn = doc.createElement("a");
       openBtn.className = "llm-search-results-open";
-      openBtn.textContent = "Open ↗";
+      openBtn.textContent = t("Open ↗");
       openBtn.href = card.href;
       openBtn.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1035,7 +1036,7 @@ function renderPaperResultListField(
   selectAllCheckbox.className = "llm-search-select-all-checkbox";
   const selectAllText = doc.createElement("span");
   selectAllText.className = "llm-search-select-all-text";
-  selectAllText.textContent = "Select all";
+  selectAllText.textContent = t("Select all");
   selectAllLabel.append(selectAllCheckbox, selectAllText);
   toolbar.appendChild(selectAllLabel);
 
@@ -1057,7 +1058,7 @@ function renderPaperResultListField(
 
     const sortLabel = doc.createElement("span");
     sortLabel.className = "llm-search-sort-label";
-    sortLabel.textContent = "Sort:";
+    sortLabel.textContent = t("Sort:");
     sortGroupEl.appendChild(sortLabel);
 
     for (const key of ["relevance", "date", "citations"] as SortKey[]) {
@@ -1066,10 +1067,10 @@ function renderPaperResultListField(
       btn.className = "llm-search-sort-btn";
       btn.textContent =
         key === "relevance"
-          ? "Relevance"
+          ? t("Relevance")
           : key === "date"
-            ? "Date"
-            : "Citations";
+            ? t("Date")
+            : t("Citations");
       btn.addEventListener("click", () => {
         sortByMode.set(activeModeId, key);
         renderActiveMode();
@@ -1126,7 +1127,7 @@ function renderPaperResultListField(
     if (rowData.href) {
       const openBtn = doc.createElement("a");
       openBtn.className = "llm-search-results-open";
-      openBtn.textContent = "Open ↗";
+      openBtn.textContent = t("Open ↗");
       openBtn.href = rowData.href;
       openBtn.addEventListener("click", (event) => {
         event.preventDefault();
@@ -1261,11 +1262,11 @@ function renderPaperResultListField(
     loadMoreButton = doc.createElement("button");
     loadMoreButton.type = "button";
     loadMoreButton.className = "llm-search-load-more-btn";
-    loadMoreButton.textContent = field.loadMoreLabel || "Load more";
+    loadMoreButton.textContent = field.loadMoreLabel || t("Load more");
     loadMoreButton.addEventListener("click", () => {
       if (!loadMoreButton) return;
       loadMoreButton.disabled = true;
-      loadMoreButton.textContent = "Loading…";
+      loadMoreButton.textContent = t("Loading…");
       // Resolve the current confirmation with the load_more actionId.
       // The action will re-fetch with a larger limit and re-invoke
       // requestConfirmation — producing a fresh card with the expanded
@@ -2862,7 +2863,7 @@ export function renderAgentTrace({
     loadingIcon.textContent = "…";
     const loadingText = doc.createElement("span");
     loadingText.className = "llm-at-text llm-at-plan-text";
-    loadingText.textContent = "Loading agent activity...";
+    loadingText.textContent = t("Loading agent activity...");
     loadingRow.append(loadingIcon, loadingText);
     list.appendChild(loadingRow);
     wrap.appendChild(list);

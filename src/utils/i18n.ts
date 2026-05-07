@@ -536,6 +536,31 @@ const zhCN: Record<string, string> = {
   "Medium": "中",
   "High": "高",
   "XHigh": "极高",
+
+  // ── Additional UI strings for full i18n coverage ─────────────────────────────
+  "Testing...": "测试中...",
+  "Starting…": "正在开始…",
+  "Thinking": "思考中",
+  "Summary": "摘要",
+  "Details": "详情",
+  "Before": "修改前",
+  "After": "修改后",
+  "Select all": "全选",
+  "Clear all": "清除全部",
+  "Move to": "移动到",
+  "Suggested tags": "建议标签",
+  "Add tag": "添加标签",
+  "Open ↗": "打开 ↗",
+  "Sort:": "排序：",
+  "Relevance": "相关性",
+  "Date": "日期",
+  "Citations": "引用数",
+  "Load more": "加载更多",
+  "Loading…": "加载中…",
+  "Loading agent activity...": "正在加载 Agent 活动...",
+  "Editing": "编辑中",
+  "Cancel (Esc)": "取消 (Esc)",
+  "No retryable response found": "未找到可重试的响应",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────

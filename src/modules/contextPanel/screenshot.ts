@@ -1,4 +1,5 @@
 import { HTML_NS } from "../../utils/domHelpers";
+import { t } from "../../utils/i18n";
 
 function estimateDataUrlByteLength(dataUrl: string): number {
   const commaIndex = dataUrl.indexOf(",");
@@ -142,7 +143,7 @@ async function captureScreenshotSelection(win: Window): Promise<string | null> {
       lineHeight: "1",
       minWidth: "120px",
     });
-    cancelBtn.textContent = "Cancel (Esc)";
+    cancelBtn.textContent = t("Cancel (Esc)");
 
     // Selection rectangle
     const selection = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
