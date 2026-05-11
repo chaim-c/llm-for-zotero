@@ -720,7 +720,6 @@ const zhCN: Record<string, string> = {
   "Agent system unavailable": "Agent 系统不可用",
   "Error: Agent system unavailable": "错误：Agent 系统不可用",
   "Unknown action: %s": "未知操作：%s",
-  "Loading Claude commands…": "正在加载 Claude 命令…",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────
