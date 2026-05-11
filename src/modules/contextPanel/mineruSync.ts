@@ -8,6 +8,9 @@ import {
   getMineruCacheDir,
   getMineruItemDir,
   hasCachedMineruMd,
+  MINERU_SOURCE_PROVENANCE_FILE,
+  readMineruSourceProvenance,
+  writeMineruSourceProvenanceForAttachment,
   writeMineruCacheFiles,
   type MineruCacheFile,
 } from "./mineruCache";
@@ -31,9 +34,12 @@ export type MineruSyncMetadata = {
   addonVersion: string;
   mineruCacheVersion?: string;
   cacheContentHash?: string;
+  attachmentId?: number;
+  attachmentKey?: string;
   sourceAttachmentKey: string;
   sourceAttachmentFilename?: string;
   parentItemKey?: string;
+  parsedAt?: string;
 };
 
 export type MineruAvailabilityStatus = "missing" | "local" | "synced" | "both";
@@ -89,6 +95,10 @@ export type MineruSyncRestoreResult = {
   reason?: string;
 };
 
+export type MineruSyncRestoreOptions = {
+  ignoreSyncPreference?: boolean;
+};
+
 export type MineruSyncMigrationResult = {
   scanned: number;
   published: number;
@@ -108,6 +118,20 @@ export type MineruSyncMigrationOptions = {
 export type MineruSyncCleanupResult = {
   deleted: number;
   failed: number;
+};
+
+export type MineruCacheRepairResult = {
+  checked: number;
+  restored: number;
+  removedOrphanCaches: number;
+  removedOrphanSyncPackages: number;
+  failed: number;
+};
+
+export type MineruCacheRepairOptions = {
+  batchSize?: number;
+  yieldMs?: number;
+  onProgress?: (result: MineruCacheRepairResult) => void;
 };
 
 type IOUtilsLike = {
@@ -293,17 +317,22 @@ function hashBytes(hash: number, bytes: Uint8Array): number {
 
 function computeCacheEntriesContentHash(
   entries: Record<string, Uint8Array>,
+  options: { includeSourceProvenance?: boolean } = {},
 ): string {
   const encoder = new TextEncoder();
   let hash = 0x811c9dc5;
   for (const path of Object.keys(entries).sort()) {
+    const normalizedPath = normalizePackagePath(path);
+    if (!normalizedPath) continue;
     if (
-      path === MINERU_SYNC_METADATA_FILE ||
-      path === MINERU_LOCAL_SYNC_STATE_FILE
+      normalizedPath === MINERU_SYNC_METADATA_FILE ||
+      normalizedPath === MINERU_LOCAL_SYNC_STATE_FILE ||
+      (!options.includeSourceProvenance &&
+        isMineruSourceProvenanceEntryPath(normalizedPath))
     ) {
       continue;
     }
-    hash = hashBytes(hash, encoder.encode(path));
+    hash = hashBytes(hash, encoder.encode(normalizedPath));
     hash = updateFnv1a(hash, 0);
     hash = hashBytes(hash, entries[path]);
     hash = updateFnv1a(hash, 0xff);
@@ -350,8 +379,16 @@ export function shouldIncludeMineruCachePackageEntry(
   if (parts[0] === "__MACOSX") return false;
   const basename = parts[parts.length - 1] || "";
   if (!basename || basename === ".DS_Store") return false;
+  if (basename === MINERU_SOURCE_PROVENANCE_FILE) return true;
   if (basename === MINERU_LOCAL_SYNC_STATE_FILE) return false;
   return basename.toLowerCase() !== "layout.json";
+}
+
+function isMineruSourceProvenanceEntryPath(relativePath: string): boolean {
+  const normalized = normalizePackagePath(relativePath);
+  if (!normalized) return false;
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] === MINERU_SOURCE_PROVENANCE_FILE;
 }
 
 function normalizeAbsolutePath(path: string): string {
@@ -450,12 +487,13 @@ export function isMineruSyncPackageAttachment(item: Zotero.Item): boolean {
   return isMineruSyncPackageTitle(getPackageAttachmentSearchText(item));
 }
 
-function createMetadata(
+async function createMetadata(
   sourceAttachment: Zotero.Item,
   cacheContentHash: string,
-): MineruSyncMetadata {
+): Promise<MineruSyncMetadata> {
   const parentItem = getParentItem(sourceAttachment);
   const now = new Date().toISOString();
+  const localProvenance = await readMineruSourceProvenance(sourceAttachment.id);
   return {
     kind: MINERU_SYNC_PACKAGE_KIND,
     version: MINERU_SYNC_PACKAGE_VERSION,
@@ -466,9 +504,12 @@ function createMetadata(
     addonVersion,
     mineruCacheVersion: MINERU_CACHE_VERSION,
     cacheContentHash,
+    attachmentId: sourceAttachment.id,
+    attachmentKey: getItemKey(sourceAttachment),
     sourceAttachmentKey: getItemKey(sourceAttachment),
     sourceAttachmentFilename: getAttachmentFilename(sourceAttachment),
     parentItemKey: getItemKey(parentItem),
+    parsedAt: localProvenance?.parsedAt,
   };
 }
 
@@ -558,7 +599,7 @@ async function buildMineruSyncPackage(sourceAttachment: Zotero.Item): Promise<{
   const entries = await collectMineruCachePackageEntries(sourceAttachment);
   if (!entries) return null;
   const contentHash = computeCacheEntriesContentHash(entries);
-  const metadata = createMetadata(sourceAttachment, contentHash);
+  const metadata = await createMetadata(sourceAttachment, contentHash);
   const packageEntries: Record<string, Uint8Array> = {
     ...entries,
     [MINERU_SYNC_METADATA_FILE]: new TextEncoder().encode(
@@ -718,7 +759,29 @@ function getPackageTimestampMs(metadata?: MineruSyncMetadata): number {
   return 0;
 }
 
-function extractPackageFiles(zipBytes: Uint8Array): ExtractedMineruSyncPackage | null {
+async function packageProvenanceMatchesSource(
+  metadata: MineruSyncMetadata | undefined,
+  sourceAttachment: Zotero.Item,
+): Promise<boolean> {
+  if (!metadata) return true;
+  const metadataKey = String(
+    metadata.sourceAttachmentKey || metadata.attachmentKey || "",
+  ).trim();
+  const sourceKey = getItemKey(sourceAttachment);
+  if (metadataKey && sourceKey && metadataKey !== sourceKey) {
+    ztoolkit.log(
+      "LLM: MinerU sync package source key mismatch",
+      metadataKey,
+      sourceAttachment.id,
+    );
+    return false;
+  }
+  return true;
+}
+
+function extractPackageFiles(
+  zipBytes: Uint8Array,
+): ExtractedMineruSyncPackage | null {
   try {
     const zipEntries = unzipSync(zipBytes);
     const metadataBytes = zipEntries[MINERU_SYNC_METADATA_FILE];
@@ -744,10 +807,14 @@ function extractPackageFiles(zipBytes: Uint8Array): ExtractedMineruSyncPackage |
 
     if (!hashEntries["full.md"]) return null;
     const contentHash = computeCacheEntriesContentHash(hashEntries);
+    const legacyContentHash = computeCacheEntriesContentHash(hashEntries, {
+      includeSourceProvenance: true,
+    });
     if (
       typeof metadata.cacheContentHash === "string" &&
       metadata.cacheContentHash.trim() &&
-      metadata.cacheContentHash !== contentHash
+      metadata.cacheContentHash !== contentHash &&
+      metadata.cacheContentHash !== legacyContentHash
     ) {
       return null;
     }
@@ -836,6 +903,12 @@ async function findPackageCandidatesForSource(
       const extracted = bytes ? extractPackageFiles(bytes) : null;
       const metadata = extracted?.metadata;
       if (metadata && metadata.sourceAttachmentKey !== sourceKey) continue;
+      if (
+        metadata &&
+        !(await packageProvenanceMatchesSource(metadata, sourceAttachment))
+      ) {
+        continue;
+      }
       if (options.requireReadable && !extracted) continue;
       if (!titleMatched && !extracted) continue;
       matches.push({
@@ -998,9 +1071,24 @@ async function writeLocalSyncState(params: {
     cacheContentHash: params.cacheContentHash,
   };
   await writeFileBytes(
-    joinLocalPath(getMineruItemDir(params.attachmentId), MINERU_LOCAL_SYNC_STATE_FILE),
+    joinLocalPath(
+      getMineruItemDir(params.attachmentId),
+      MINERU_LOCAL_SYNC_STATE_FILE,
+    ),
     new TextEncoder().encode(JSON.stringify(state, null, 2)),
   );
+}
+
+async function writeRestoredSourceProvenance(params: {
+  sourceAttachment: Zotero.Item;
+  packageAttachmentId?: number;
+  cacheContentHash?: string;
+}): Promise<void> {
+  await writeMineruSourceProvenanceForAttachment(params.sourceAttachment, {
+    origin: "restored",
+    packageAttachmentId: params.packageAttachmentId,
+    cacheContentHash: params.cacheContentHash,
+  });
 }
 
 async function invalidateRestoredMineruCache(
@@ -1054,7 +1142,9 @@ export async function publishMineruCachePackageForAttachment(
       requireReadable: false,
     });
     const equivalent = selectBestPackageCandidate(
-      existing.filter((candidate) => candidate.contentHash === built.contentHash),
+      existing.filter(
+        (candidate) => candidate.contentHash === built.contentHash,
+      ),
     );
     if (equivalent) {
       await prunePackageCandidates(existing, equivalent.item.id);
@@ -1093,9 +1183,12 @@ export async function publishMineruCachePackageForAttachment(
 
 export async function ensureMineruRuntimeCacheForAttachment(
   sourceAttachment: Zotero.Item,
+  options: MineruSyncRestoreOptions = {},
 ): Promise<MineruSyncRestoreResult> {
   const attachmentId = sourceAttachment.id;
-  if (!isMineruSyncEnabled()) return { status: "disabled", attachmentId };
+  if (!options.ignoreSyncPreference && !isMineruSyncEnabled()) {
+    return { status: "disabled", attachmentId };
+  }
   if (!isPdfAttachment(sourceAttachment))
     return { status: "not_pdf", attachmentId };
   const sourceKey = getItemKey(sourceAttachment);
@@ -1125,6 +1218,11 @@ export async function ensureMineruRuntimeCacheForAttachment(
       selected.extracted.mdContent,
       selected.extracted.files,
     );
+    await writeRestoredSourceProvenance({
+      sourceAttachment,
+      packageAttachmentId: selected.item.id,
+      cacheContentHash: packageContentHash,
+    });
     await writeLocalSyncState({
       attachmentId,
       sourceAttachmentKey: sourceKey,
@@ -1180,9 +1278,12 @@ export async function ensureMineruCacheDirForAttachment(
 
 export async function repairSyncedMineruCacheForAttachment(
   sourceAttachment: Zotero.Item,
+  options: MineruSyncRestoreOptions = {},
 ): Promise<MineruSyncRestoreResult> {
   const attachmentId = sourceAttachment.id;
-  if (!isMineruSyncEnabled()) return { status: "disabled", attachmentId };
+  if (!options.ignoreSyncPreference && !isMineruSyncEnabled()) {
+    return { status: "disabled", attachmentId };
+  }
   if (!isPdfAttachment(sourceAttachment))
     return { status: "not_pdf", attachmentId };
   const sourceKey = getItemKey(sourceAttachment);
@@ -1208,16 +1309,13 @@ export async function repairSyncedMineruCacheForAttachment(
     );
     const diverged = uniqueHashes.size > 1;
     if (diverged) {
-      ztoolkit.log(
-        "LLM: MinerU sync package divergence detected",
-        sourceKey,
-        [...uniqueHashes],
-      );
+      ztoolkit.log("LLM: MinerU sync package divergence detected", sourceKey, [
+        ...uniqueHashes,
+      ]);
     }
     const packageContentHash = selected.extracted.contentHash;
-    const localContentHash = await computeLocalMineruCacheContentHash(
-      attachmentId,
-    );
+    const localContentHash =
+      await computeLocalMineruCacheContentHash(attachmentId);
 
     if (localContentHash && localContentHash === packageContentHash) {
       await writeLocalSyncState({
@@ -1242,6 +1340,11 @@ export async function repairSyncedMineruCacheForAttachment(
       selected.extracted.mdContent,
       selected.extracted.files,
     );
+    await writeRestoredSourceProvenance({
+      sourceAttachment,
+      packageAttachmentId: selected.item.id,
+      cacheContentHash: packageContentHash,
+    });
     await writeLocalSyncState({
       attachmentId,
       sourceAttachmentKey: sourceKey,
@@ -1301,6 +1404,161 @@ async function getAllLibraryPdfAttachments(): Promise<Zotero.Item[]> {
     }
   }
   return out;
+}
+
+function cloneRepairResult(
+  result: MineruCacheRepairResult,
+): MineruCacheRepairResult {
+  return { ...result };
+}
+
+function basenameOf(path: string): string {
+  return normalizeAbsolutePath(path).split("/").pop() || "";
+}
+
+function numericCacheIdFromPath(path: string): number | null {
+  const basename = basenameOf(path);
+  if (!/^\d+$/.test(basename)) return null;
+  const id = Number(basename);
+  return Number.isFinite(id) && id > 0 ? Math.floor(id) : null;
+}
+
+async function listLocalNumericCacheIds(): Promise<number[]> {
+  const io = getIOUtils();
+  if (!io?.getChildren) return [];
+  const cacheDir = getMineruCacheDir();
+  try {
+    if (!(await pathExists(cacheDir))) return [];
+    const children = await io.getChildren(cacheDir);
+    const ids: number[] = [];
+    for (const child of children) {
+      const id = numericCacheIdFromPath(child);
+      if (id !== null) ids.push(id);
+    }
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
+async function cleanupOrphanSyncedMineruPackages(
+  currentPdfByKey: Map<string, Zotero.Item>,
+): Promise<{ deleted: number; failed: number }> {
+  const result = { deleted: 0, failed: 0 };
+  const libraryID = Number(Zotero.Libraries.userLibraryID);
+  if (!Number.isFinite(libraryID) || libraryID <= 0) return result;
+
+  let items: Zotero.Item[];
+  try {
+    items = await Zotero.Items.getAll(
+      Math.floor(libraryID),
+      false,
+      false,
+      false,
+    );
+  } catch {
+    return result;
+  }
+
+  for (const item of items) {
+    if (!item?.isAttachment?.()) continue;
+    if ((item as unknown as { deleted?: boolean }).deleted) continue;
+    if (!isMineruSyncPackageAttachment(item)) continue;
+
+    let metadata: MineruSyncMetadata | null = null;
+    try {
+      const bytes = await readAttachmentFileBytes(item);
+      metadata = bytes ? readMineruSyncMetadataFromPackageBytes(bytes) : null;
+    } catch {
+      metadata = null;
+    }
+    if (!metadata) continue;
+
+    const sourceAttachment = currentPdfByKey.get(metadata.sourceAttachmentKey);
+    if (!sourceAttachment) {
+      try {
+        await deletePackageAttachment(item);
+        result.deleted += 1;
+      } catch {
+        result.failed += 1;
+      }
+      continue;
+    }
+
+    await packageProvenanceMatchesSource(metadata, sourceAttachment);
+  }
+
+  return result;
+}
+
+export async function repairMineruCaches(
+  options: MineruCacheRepairOptions = {},
+): Promise<MineruCacheRepairResult> {
+  const result: MineruCacheRepairResult = {
+    checked: 0,
+    restored: 0,
+    removedOrphanCaches: 0,
+    removedOrphanSyncPackages: 0,
+    failed: 0,
+  };
+  const batchSize =
+    Number.isFinite(options.batchSize) && Number(options.batchSize) > 0
+      ? Math.floor(Number(options.batchSize))
+      : 20;
+  const yieldMs =
+    Number.isFinite(options.yieldMs) && Number(options.yieldMs) >= 0
+      ? Math.floor(Number(options.yieldMs))
+      : 10;
+
+  const pdfAttachments = await getAllLibraryPdfAttachments();
+  const currentPdfIds = new Set(pdfAttachments.map((item) => item.id));
+  const currentPdfByKey = new Map<string, Zotero.Item>();
+  for (const item of pdfAttachments) {
+    const key = getItemKey(item);
+    if (key) currentPdfByKey.set(key, item);
+  }
+
+  for (const cacheId of await listLocalNumericCacheIds()) {
+    if (currentPdfIds.has(cacheId)) continue;
+    try {
+      await removePath(getMineruItemDir(cacheId));
+      result.removedOrphanCaches += 1;
+    } catch {
+      result.failed += 1;
+    }
+  }
+
+  for (const item of pdfAttachments) {
+    result.checked += 1;
+    try {
+      if (!(await hasCachedMineruMd(item.id))) {
+        const restored = await repairSyncedMineruCacheForAttachment(item, {
+          ignoreSyncPreference: true,
+        });
+        if (restored.status === "restored") {
+          result.restored += 1;
+        } else if (restored.status === "error") {
+          result.failed += 1;
+        }
+      }
+    } catch (error) {
+      result.failed += 1;
+      ztoolkit.log("LLM: MinerU cache repair failed", item.id, error);
+    }
+
+    if (result.checked % batchSize === 0) {
+      options.onProgress?.(cloneRepairResult(result));
+      await yieldToUi(yieldMs);
+    }
+  }
+
+  const orphanPackages =
+    await cleanupOrphanSyncedMineruPackages(currentPdfByKey);
+  result.removedOrphanSyncPackages += orphanPackages.deleted;
+  result.failed += orphanPackages.failed;
+
+  options.onProgress?.(cloneRepairResult(result));
+  return result;
 }
 
 export async function publishExistingMineruCaches(

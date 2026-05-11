@@ -109,7 +109,6 @@ import {
   setClaudeAutoCompactEnabled,
   setClaudeAutoCompactThresholdPercent,
   setClaudeBridgeUrl,
-  setClaudeCodeModeEnabled,
   setClaudeManagedInstructionTemplatePref,
   setConversationSystemPref,
   setClaudePermissionModePref,
@@ -118,21 +117,30 @@ import {
   setClaudeBlockStreamingEnabled,
 } from "../claudeCode/prefs";
 import {
+  getCodexBinaryPathPref,
   getCodexReasoningModePref,
   getCodexRuntimeModelPref,
   isCodexZoteroMcpToolsEnabled,
   isCodexAppServerModeEnabled,
   setCodexAppServerModeEnabled,
+  setCodexBinaryPathPref,
   setCodexZoteroMcpToolsEnabled,
   setCodexReasoningModePref,
   setCodexRuntimeModelPref,
 } from "../codexAppServer/prefs";
 import {
+  getConfiguredCodexAppServerBinaryPath,
+} from "../codexAppServer/binaryPath";
+import {
   installOrUpdateCodexZoteroMcpConfig,
   readCodexNativeMcpSetupStatus,
 } from "../codexAppServer/mcpSetup";
 import type { CodexReasoningMode } from "../codexAppServer/constants";
-import { getClaudeProfileSignature } from "../claudeCode/projectSkills";
+import {
+  getClaudeRuntimeRootDir,
+  getClaudeUserHomeDir,
+} from "../claudeCode/projectSkills";
+import { applyClaudeCodeModePreferenceChange } from "../claudeCode/bootstrapGate";
 import {
   getDefaultClaudeManagedInstructionBlock,
   readClaudeProjectManagedInstructionBlock,
@@ -880,6 +888,12 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     const xhighOpt = codexAppServerReasoningSelect.querySelector('option[value="xhigh"]');
     if (xhighOpt) xhighOpt.textContent = t('XHigh');
   }
+  const codexAppServerPathInput = doc.querySelector(
+    `#${config.addonRef}-codex-app-server-path`,
+  ) as HTMLInputElement | null;
+  const codexAppServerPathHelper = doc.querySelector(
+    `#${config.addonRef}-codex-app-server-path-helper`,
+  ) as HTMLSpanElement | null;
   const codexAppServerTestBtn = doc.querySelector(
     `#${config.addonRef}-codex-app-server-test`,
   ) as HTMLButtonElement | null;
@@ -2212,6 +2226,23 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     });
   }
 
+  if (codexAppServerPathInput) {
+    codexAppServerPathInput.value = getCodexBinaryPathPref();
+    const commitCodexPath = () => {
+      setCodexBinaryPathPref(codexAppServerPathInput.value);
+      codexAppServerPathInput.value = getCodexBinaryPathPref();
+    };
+    codexAppServerPathInput.addEventListener("change", commitCodexPath);
+    codexAppServerPathInput.addEventListener("blur", commitCodexPath);
+    codexAppServerPathInput.addEventListener("input", () => {
+      setCodexBinaryPathPref(codexAppServerPathInput.value);
+    });
+  }
+
+  if (codexAppServerPathHelper) {
+    codexAppServerPathHelper.textContent = t(getCodexAppServerPathHelperText());
+  }
+
   if (codexAppServerTestBtn && codexAppServerStatus) {
     codexAppServerTestBtn.addEventListener("click", () => {
       void (async () => {
@@ -2223,7 +2254,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           const result = await runCodexAppServerConnectionTest({
             modelName:
               codexAppServerModelInput?.value || getCodexRuntimeModelPref(),
-            codexPath: "",
+            codexPath: getConfiguredCodexAppServerBinaryPath(),
           });
           codexAppServerStatus.textContent =
             `${t("✓ Success — model says: ")}"${result.reply}"`;
@@ -2269,7 +2300,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         renderCodexMcpStatus(t("Configuring Zotero MCP tools…"));
         try {
           const status = await installOrUpdateCodexZoteroMcpConfig({
-            codexPath: "",
+            codexPath: getConfiguredCodexAppServerBinaryPath(),
           });
           setCodexZoteroMcpToolsEnabled(true);
           if (codexAppServerMcpEnableInput) {
@@ -2298,7 +2329,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
 
   if (codexAppServerMcpStatus && isCodexZoteroMcpToolsEnabled()) {
     renderCodexMcpStatus(t("Checking Zotero MCP setup…"));
-    void readCodexNativeMcpSetupStatus({ codexPath: "" })
+    void readCodexNativeMcpSetupStatus({
+      codexPath: getConfiguredCodexAppServerBinaryPath(),
+    })
       .then((status) => {
         renderCodexMcpStatus(
           status.connected === true
@@ -2329,11 +2362,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     applyAgentBackendUi(isClaudeCodeModeEnabled());
     agentBackendModeSelect.addEventListener("change", () => {
       const enabled = agentBackendModeSelect.value === "claude_bridge";
-      applyAgentBackendUi(enabled);
-      setClaudeCodeModeEnabled(enabled);
-      if (!enabled && getConversationSystemPref() === "claude_code") {
-        setConversationSystemPref("upstream");
-      }
+      void applyClaudeCodeModePreferenceChange(enabled, applyAgentBackendUi);
     });
   }
 
@@ -2488,16 +2517,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   };
 
   const getCurrentClaudeLocalDir = (): string => {
-    const env = getProcess()?.env;
-    const home =
-      env?.HOME?.trim() ||
-      env?.USERPROFILE?.trim() ||
-      getPathUtils()?.homeDir?.trim() ||
-      getOS()?.Constants?.Path?.homeDir?.trim() ||
-      getServices()?.dirsvc?.get?.("Home", getNsIFile())?.path?.trim() ||
-      (Zotero as unknown as { Profile?: { dir?: string } }).Profile?.dir?.trim() ||
-      ".";
-    const runtimeRoot = joinLocalPath(home, "Zotero", "agent-runtime", getClaudeProfileSignature());
+    const runtimeRoot = getClaudeRuntimeRootDir();
     const scopesRoot = joinLocalPath(runtimeRoot, "scopes");
     const conversationSystem = getConversationSystemPref();
     if (conversationSystem !== "claude_code") {
@@ -2533,16 +2553,18 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const renderClaudeConfigPaths = () => {
     if (!claudeConfigPathsWrap) return;
     claudeConfigPathsWrap.replaceChildren();
-    const env = getProcess()?.env;
-    const home =
-      env?.HOME?.trim() ||
-      env?.USERPROFILE?.trim() ||
-      getPathUtils()?.homeDir?.trim() ||
-      getOS()?.Constants?.Path?.homeDir?.trim() ||
-      getServices()?.dirsvc?.get?.("Home", getNsIFile())?.path?.trim() ||
-      (Zotero as unknown as { Profile?: { dir?: string } }).Profile?.dir?.trim() ||
-      "";
-    const runtimeRoot = joinLocalPath(home || ".", "Zotero", "agent-runtime", getClaudeProfileSignature());
+    let home = "";
+    try {
+      home = getClaudeUserHomeDir();
+    } catch {
+      home = "";
+    }
+    let runtimeRoot = "";
+    try {
+      runtimeRoot = getClaudeRuntimeRootDir();
+    } catch {
+      runtimeRoot = joinLocalPath(".", "Zotero", "agent-runtime", "<profile>");
+    }
     const projectClaudeDir = joinLocalPath(runtimeRoot, ".claude");
     const localConversationDir = joinLocalPath(
       runtimeRoot,

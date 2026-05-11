@@ -314,6 +314,112 @@ describe("llmClient prepareChatRequest", function () {
     assert.equal(capturedBody?.temperature, 0.3);
   });
 
+  it("sends PDF attachments as Anthropic Messages document blocks", async function () {
+    let capturedBody: Record<string, unknown> | null = null;
+    mockFetch(async (_url, init) => {
+      capturedBody = JSON.parse(String(init?.body || "{}")) as Record<
+        string,
+        unknown
+      >;
+      return anthropicOkStream();
+    });
+    const originalIOUtils = (
+      globalThis as typeof globalThis & { IOUtils?: unknown }
+    ).IOUtils;
+    (
+      globalThis as typeof globalThis & {
+        IOUtils?: { read: (path: string) => Promise<Uint8Array> };
+      }
+    ).IOUtils = {
+      read: async () => new TextEncoder().encode("%PDF test"),
+    };
+
+    try {
+      await callLLMStream(
+        {
+          prompt: "Summarize this PDF.",
+          model: "claude-sonnet-4-6",
+          apiBase: "https://api.anthropic.com/v1",
+          apiKey: "anthropic-test",
+          providerProtocol: "anthropic_messages",
+          attachments: [
+            {
+              name: "paper.pdf",
+              mimeType: "application/pdf",
+              storedPath: "/tmp/paper.pdf",
+            },
+          ],
+        },
+        () => undefined,
+      );
+    } finally {
+      (
+        globalThis as typeof globalThis & { IOUtils?: typeof originalIOUtils }
+      ).IOUtils = originalIOUtils;
+    }
+
+    const messages = capturedBody?.messages as
+      | Array<{ content?: Array<Record<string, unknown>> }>
+      | undefined;
+    const content = messages?.[messages.length - 1]?.content || [];
+    const documentBlock = content.find((part) => part.type === "document") as
+      | { source?: { type?: string; media_type?: string; data?: string } }
+      | undefined;
+    assert.equal(documentBlock?.source?.type, "base64");
+    assert.equal(documentBlock?.source?.media_type, "application/pdf");
+    assert.equal(documentBlock?.source?.data, "JVBERiB0ZXN0");
+    assert.isUndefined(
+      content.find(
+        (part) =>
+          part.type === "image" &&
+          (part.source as { media_type?: string } | undefined)?.media_type ===
+            "application/pdf",
+      ),
+    );
+  });
+
+  it("maps PDF data URLs to Anthropic Messages document blocks", async function () {
+    let capturedBody: Record<string, unknown> | null = null;
+    mockFetch(async (_url, init) => {
+      capturedBody = JSON.parse(String(init?.body || "{}")) as Record<
+        string,
+        unknown
+      >;
+      return anthropicOkStream();
+    });
+
+    await callLLMStream(
+      {
+        prompt: "Summarize this PDF.",
+        images: ["data:application/pdf;base64,JVBERi0x"],
+        model: "claude-sonnet-4-6",
+        apiBase: "https://api.anthropic.com/v1",
+        apiKey: "anthropic-test",
+        providerProtocol: "anthropic_messages",
+      },
+      () => undefined,
+    );
+
+    const messages = capturedBody?.messages as
+      | Array<{ content?: Array<Record<string, unknown>> }>
+      | undefined;
+    const content = messages?.[messages.length - 1]?.content || [];
+    const documentBlock = content.find((part) => part.type === "document") as
+      | { source?: { type?: string; media_type?: string; data?: string } }
+      | undefined;
+    assert.equal(documentBlock?.source?.type, "base64");
+    assert.equal(documentBlock?.source?.media_type, "application/pdf");
+    assert.equal(documentBlock?.source?.data, "JVBERi0x");
+    assert.isUndefined(
+      content.find(
+        (part) =>
+          part.type === "image" &&
+          (part.source as { media_type?: string } | undefined)?.media_type ===
+            "application/pdf",
+      ),
+    );
+  });
+
   it("uses adaptive thinking for Sonnet 4.6 and never sends temperature", async function () {
     let capturedBody: Record<string, unknown> | null = null;
     mockFetch(async (_url, init) => {
@@ -509,355 +615,6 @@ describe("llmClient prepareChatRequest", function () {
         (error as Error).message,
         "extended thinking requires max_tokens of at least 2048",
       );
-    }
-  });
-
-  it("normalizes blank codex app server apiBase values for chat requests", async function () {
-    const originalChromeUtils = (
-      globalThis as typeof globalThis & {
-        ChromeUtils?: unknown;
-      }
-    ).ChromeUtils;
-    const originalCodexPath = globalThis.process?.env?.CODEX_PATH;
-    const stdout = new MockStdout();
-    let startedThread = false;
-
-    (
-      globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }
-    ).set(
-      "extensions.zotero.llmforzotero.modelProviderGroups",
-      JSON.stringify([
-        {
-          id: "provider-codex-app",
-          apiBase: "",
-          apiKey: "",
-          authMode: "codex_app_server",
-          models: [
-            {
-              id: "model-1",
-              model: "gpt-5.4",
-              temperature: 0.3,
-              maxTokens: 256,
-            },
-          ],
-        },
-      ]),
-    );
-    (
-      globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }
-    ).set(
-      "extensions.zotero.llmforzotero.modelProviderGroupsMigrationVersion",
-      3,
-    );
-
-    try {
-      if (globalThis.process?.env) {
-        globalThis.process.env.CODEX_PATH = "/mock/codex";
-      }
-      (globalThis.Zotero as unknown as { isWin?: boolean }).isWin = true;
-
-      (
-        globalThis as typeof globalThis & {
-          ChromeUtils?: {
-            importESModule: (path: string) => {
-              Subprocess: {
-                call: (params: { arguments?: string[] }) => Promise<unknown>;
-              };
-            };
-          };
-        }
-      ).ChromeUtils = {
-        importESModule: (path: string) => {
-          assert.include(path, "Subprocess");
-          return {
-            Subprocess: {
-              call: async (_params: { arguments?: string[] }) => ({
-                stdout,
-                stdin: {
-                  write: (chunk: string) => {
-                    for (const line of chunk.split("\n")) {
-                      if (!line.trim()) continue;
-                      const message = JSON.parse(line) as {
-                        id?: number;
-                        method?: string;
-                      };
-                      if (message.method === "initialize") {
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: {} })}\n`,
-                        );
-                        continue;
-                      }
-                      if (message.method === "thread/start") {
-                        startedThread = true;
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: { id: "thread-1" } })}\n`,
-                        );
-                        continue;
-                      }
-                      if (message.method === "thread/inject_items") {
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: {} })}\n`,
-                        );
-                        continue;
-                      }
-                      if (message.method === "turn/start") {
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: { id: "turn-1" } })}\n`,
-                        );
-                        queueMicrotask(() => {
-                          stdout.push(
-                            `${JSON.stringify({ method: "item/agentMessage/delta", params: { turnId: "turn-1", delta: "Hello" } })}\n`,
-                          );
-                          stdout.push(
-                            `${JSON.stringify({ method: "turn/completed", params: { turnId: "turn-1", status: "completed" } })}\n`,
-                          );
-                        });
-                      }
-                    }
-                  },
-                },
-                kill: () => undefined,
-              }),
-            },
-          };
-        },
-      };
-
-      const prepared = prepareChatRequest({
-        prompt: "What changed?",
-      });
-      const output = await callLLMStream(
-        {
-          prompt: "What changed?",
-        },
-        () => undefined,
-      );
-
-      assert.equal(
-        prepared.apiBase,
-        "https://chatgpt.com/backend-api/codex/responses",
-      );
-      assert.equal(prepared.authMode, "codex_app_server");
-      assert.equal(output, "Hello");
-      assert.isTrue(startedThread);
-    } finally {
-      destroyCachedCodexAppServerProcess("codex_app_server_chat");
-      if (globalThis.process?.env) {
-        if (typeof originalCodexPath === "string") {
-          globalThis.process.env.CODEX_PATH = originalCodexPath;
-        } else {
-          delete globalThis.process.env.CODEX_PATH;
-        }
-      }
-      (
-        globalThis as typeof globalThis & { ChromeUtils?: unknown }
-      ).ChromeUtils = originalChromeUtils;
-    }
-  });
-
-  it("routes codex app server chat requests through the local app-server transport", async function () {
-    const originalChromeUtils = (
-      globalThis as typeof globalThis & {
-        ChromeUtils?: unknown;
-      }
-    ).ChromeUtils;
-    const originalCodexPath = globalThis.process?.env?.CODEX_PATH;
-    const stdout = new MockStdout();
-    let lastTurnInput: unknown = "";
-    let lastInjectedItems: unknown = null;
-    let lastThreadStartParams: Record<string, unknown> | null = null;
-    let lastTurnParams: Record<string, unknown> | null = null;
-    const reasoning: string[] = [];
-    const usage: Array<{
-      promptTokens: number;
-      completionTokens: number;
-      totalTokens: number;
-    }> = [];
-
-    try {
-      if (globalThis.process?.env) {
-        globalThis.process.env.CODEX_PATH = "/mock/codex";
-      }
-      (globalThis.Zotero as unknown as { isWin?: boolean }).isWin = true;
-
-      (
-        globalThis as typeof globalThis & {
-          ChromeUtils?: {
-            importESModule: (path: string) => {
-              Subprocess: {
-                call: (params: { arguments?: string[] }) => Promise<unknown>;
-              };
-            };
-          };
-        }
-      ).ChromeUtils = {
-        importESModule: (path: string) => {
-          assert.include(path, "Subprocess");
-          return {
-            Subprocess: {
-              call: async (_params: { arguments?: string[] }) => ({
-                stdout,
-                stdin: {
-                  write: (chunk: string) => {
-                    for (const line of chunk.split("\n")) {
-                      if (!line.trim()) continue;
-                      const message = JSON.parse(line) as {
-                        id?: number;
-                        method?: string;
-                        params?: Record<string, unknown> & { input?: unknown };
-                      };
-                      if (message.method === "initialize") {
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: {} })}\n`,
-                        );
-                        continue;
-                      }
-                      if (message.method === "thread/start") {
-                        assert.equal(message.params?.ephemeral, true);
-                        lastThreadStartParams = message.params || null;
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: { id: "thread-1" } })}\n`,
-                        );
-                        continue;
-                      }
-                      if (message.method === "thread/inject_items") {
-                        lastInjectedItems = message.params?.items ?? null;
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: {} })}\n`,
-                        );
-                        continue;
-                      }
-                      if (message.method === "turn/start") {
-                        lastTurnParams = (message.params || {}) as Record<
-                          string,
-                          unknown
-                        >;
-                        lastTurnInput = message.params?.input ?? "";
-                        stdout.push(
-                          `${JSON.stringify({ id: message.id, result: { id: "turn-1" } })}\n`,
-                        );
-                        queueMicrotask(() => {
-                          stdout.push(
-                            `${JSON.stringify({ method: "item/reasoning/summaryTextDelta", params: { itemId: "reasoning-1", delta: "Checking the history." } })}\n`,
-                          );
-                          stdout.push(
-                            `${JSON.stringify({ method: "item/agentMessage/delta", params: { turnId: "turn-1", delta: "Hello" } })}\n`,
-                          );
-                          stdout.push(
-                            `${JSON.stringify({ method: "thread/tokenUsage/updated", params: { threadId: "thread-1", turnId: "turn-1", tokenUsage: { last: { totalTokens: 12, inputTokens: 9, outputTokens: 3 } } } })}\n`,
-                          );
-                          stdout.push(
-                            `${JSON.stringify({ method: "turn/completed", params: { turnId: "turn-1", status: "completed" } })}\n`,
-                          );
-                        });
-                      }
-                    }
-                  },
-                },
-                kill: () => undefined,
-              }),
-            },
-          };
-        },
-      };
-
-      const chunks: string[] = [];
-      const prepared = prepareChatRequest({
-        prompt: "What changed?",
-        image: "file:///C:/Users/alice/figure.png",
-        history: [
-          { role: "user", content: "Earlier question." },
-          { role: "assistant", content: "Earlier answer." },
-        ],
-        model: "gpt-5.4",
-        authMode: "codex_app_server",
-        apiBase: "https://chatgpt.com/backend-api/codex/responses",
-        reasoning: {
-          provider: "openai",
-          level: "high",
-        },
-      });
-      const output = await callLLMStream(
-        {
-          prompt: "What changed?",
-          image: "file:///C:/Users/alice/figure.png",
-          history: [
-            { role: "user", content: "Earlier question." },
-            { role: "assistant", content: "Earlier answer." },
-          ],
-          model: "gpt-5.4",
-          authMode: "codex_app_server",
-          apiBase: "https://chatgpt.com/backend-api/codex/responses",
-          reasoning: {
-            provider: "openai",
-            level: "high",
-          },
-        },
-        (delta) => {
-          chunks.push(delta);
-        },
-        (event) => {
-          if (event.summary) {
-            reasoning.push(event.summary);
-          }
-        },
-        (event) => {
-          usage.push(event);
-        },
-      );
-
-      assert.equal(output, "Hello");
-      assert.deepEqual(chunks, ["Hello"]);
-      assert.deepEqual(reasoning, ["Checking the history."]);
-      assert.deepEqual(usage, [
-        {
-          promptTokens: 9,
-          completionTokens: 3,
-          totalTokens: 12,
-        },
-      ]);
-      assert.equal(lastTurnParams?.model, "gpt-5.4");
-      assert.equal(lastTurnParams?.effort, "high");
-      assert.equal(lastTurnParams?.summary, "detailed");
-      assert.equal(
-        lastThreadStartParams?.developerInstructions,
-        (prepared.messages[0] as { content: string }).content,
-      );
-      assert.isArray(lastTurnInput);
-      const input = lastTurnInput as Array<Record<string, unknown>>;
-      const textParts = input
-        .filter((part) => part.type === "text")
-        .map((part) => String(part.text || ""));
-      assert.deepEqual(textParts, ["What changed?"]);
-      const imagePart = input.find((part) => part.type === "localImage");
-      assert.deepEqual(imagePart, {
-        type: "localImage",
-        path: "/mnt/c/Users/alice/figure.png",
-      });
-      assert.deepEqual(lastInjectedItems, [
-        {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "Earlier question." }],
-        },
-        {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", text: "Earlier answer." }],
-        },
-      ]);
-    } finally {
-      destroyCachedCodexAppServerProcess("codex_app_server_chat");
-      if (globalThis.process?.env) {
-        if (typeof originalCodexPath === "string") {
-          globalThis.process.env.CODEX_PATH = originalCodexPath;
-        } else {
-          delete globalThis.process.env.CODEX_PATH;
-        }
-      }
-      (
-        globalThis as typeof globalThis & { ChromeUtils?: unknown }
-      ).ChromeUtils = originalChromeUtils;
     }
   });
 

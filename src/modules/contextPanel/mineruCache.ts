@@ -1,10 +1,41 @@
 import { getLocalParentPath, joinLocalPath } from "../../utils/localPath";
 
 const MINERU_CACHE_DIR_NAME = "llm-for-zotero-mineru";
+export const MINERU_SOURCE_PROVENANCE_FILE = "_llm_source.json";
 
 export type MineruCacheFile = {
   relativePath: string;
   data: Uint8Array;
+};
+
+export const MINERU_SOURCE_PROVENANCE_KIND =
+  "llm-for-zotero/mineru-cache-source";
+export const MINERU_SOURCE_PROVENANCE_VERSION = 2;
+
+export type MineruSourceOrigin = "parsed" | "restored";
+
+export type MineruSourceProvenance = {
+  kind: typeof MINERU_SOURCE_PROVENANCE_KIND;
+  version: typeof MINERU_SOURCE_PROVENANCE_VERSION;
+  attachmentId: number;
+  attachmentKey?: string;
+  parentItemKey?: string;
+  sourceFilename?: string;
+  origin: MineruSourceOrigin;
+  recordedAt: string;
+  parsedAt?: string;
+  restoredAt?: string;
+  packageAttachmentId?: number;
+  cacheContentHash?: string;
+};
+
+export type MineruSourceProvenanceWriteOptions = {
+  origin?: MineruSourceOrigin;
+  recordedAt?: string;
+  parsedAt?: string;
+  restoredAt?: string;
+  packageAttachmentId?: number;
+  cacheContentHash?: string;
 };
 
 type NormalizedMineruCacheFile = MineruCacheFile & {
@@ -604,6 +635,157 @@ function formatCacheWriteError(error: unknown): string {
     /* ignore */
   }
   return String(error || "Unknown error");
+}
+
+function getItemKey(item: Zotero.Item | null | undefined): string {
+  const value = (item as unknown as { key?: unknown } | null | undefined)?.key;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getAttachmentFilename(item: Zotero.Item): string {
+  return String(
+    (item as unknown as { attachmentFilename?: unknown }).attachmentFilename ||
+      "",
+  ).trim();
+}
+
+function getParentItem(item: Zotero.Item): Zotero.Item | null {
+  const parentId = Number(item.parentID);
+  if (!Number.isFinite(parentId) || parentId <= 0) return null;
+  return Zotero.Items.get(Math.floor(parentId)) || null;
+}
+
+function parseMineruSourceProvenance(
+  value: unknown,
+): MineruSourceProvenance | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<MineruSourceProvenance> & {
+    kind?: unknown;
+    version?: unknown;
+    attachmentId?: unknown;
+    attachmentKey?: unknown;
+    parentItemKey?: unknown;
+    sourceFilename?: unknown;
+    origin?: unknown;
+    recordedAt?: unknown;
+    parsedAt?: unknown;
+    restoredAt?: unknown;
+    packageAttachmentId?: unknown;
+    cacheContentHash?: unknown;
+  };
+  const attachmentId = Number(record.attachmentId);
+  if (!Number.isFinite(attachmentId) || attachmentId <= 0) {
+    return null;
+  }
+  const origin =
+    record.origin === "parsed" || record.origin === "restored"
+      ? record.origin
+      : "parsed";
+  const legacyParsedAt =
+    typeof record.parsedAt === "string" && record.parsedAt.trim()
+      ? record.parsedAt.trim()
+      : undefined;
+  const recordedAt =
+    typeof record.recordedAt === "string" && record.recordedAt.trim()
+      ? record.recordedAt.trim()
+      : legacyParsedAt || new Date(0).toISOString();
+  const packageAttachmentId = Number(record.packageAttachmentId);
+  return {
+    kind: MINERU_SOURCE_PROVENANCE_KIND,
+    version: MINERU_SOURCE_PROVENANCE_VERSION,
+    attachmentId: Math.floor(attachmentId),
+    attachmentKey:
+      typeof record.attachmentKey === "string"
+        ? record.attachmentKey
+        : undefined,
+    parentItemKey:
+      typeof record.parentItemKey === "string"
+        ? record.parentItemKey
+        : undefined,
+    sourceFilename:
+      typeof record.sourceFilename === "string"
+        ? record.sourceFilename
+        : undefined,
+    origin,
+    recordedAt,
+    parsedAt: legacyParsedAt,
+    restoredAt:
+      typeof record.restoredAt === "string" && record.restoredAt.trim()
+        ? record.restoredAt.trim()
+        : undefined,
+    packageAttachmentId:
+      Number.isFinite(packageAttachmentId) && packageAttachmentId > 0
+        ? Math.floor(packageAttachmentId)
+        : undefined,
+    cacheContentHash:
+      typeof record.cacheContentHash === "string" &&
+      record.cacheContentHash.trim()
+        ? record.cacheContentHash.trim()
+        : undefined,
+  };
+}
+
+function getMineruSourceProvenancePath(id: number): string {
+  return joinLocalPath(getMineruItemDir(id), MINERU_SOURCE_PROVENANCE_FILE);
+}
+
+export async function buildMineruSourceProvenance(
+  attachment: Zotero.Item,
+  options: MineruSourceProvenanceWriteOptions = {},
+): Promise<MineruSourceProvenance> {
+  const parentItem = getParentItem(attachment);
+  const now = options.recordedAt || new Date().toISOString();
+  const origin = options.origin || "parsed";
+  return {
+    kind: MINERU_SOURCE_PROVENANCE_KIND,
+    version: MINERU_SOURCE_PROVENANCE_VERSION,
+    attachmentId: attachment.id,
+    attachmentKey: getItemKey(attachment) || undefined,
+    parentItemKey: getItemKey(parentItem) || undefined,
+    sourceFilename: getAttachmentFilename(attachment) || undefined,
+    origin,
+    recordedAt: now,
+    parsedAt: options.parsedAt || (origin === "parsed" ? now : undefined),
+    restoredAt: options.restoredAt || (origin === "restored" ? now : undefined),
+    packageAttachmentId: options.packageAttachmentId,
+    cacheContentHash: options.cacheContentHash,
+  };
+}
+
+export async function readMineruSourceProvenance(
+  attachmentId: number,
+): Promise<MineruSourceProvenance | null> {
+  const bytes = await readFileBytes(
+    getMineruSourceProvenancePath(attachmentId),
+  );
+  if (!bytes) return null;
+  try {
+    return parseMineruSourceProvenance(
+      JSON.parse(new TextDecoder("utf-8").decode(bytes)),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function writeMineruSourceProvenance(
+  attachmentId: number,
+  provenance: MineruSourceProvenance,
+): Promise<void> {
+  await ensureDir(getMineruItemDir(attachmentId));
+  await writeFileBytes(
+    getMineruSourceProvenancePath(attachmentId),
+    new TextEncoder().encode(JSON.stringify(provenance, null, 2)),
+  );
+}
+
+export async function writeMineruSourceProvenanceForAttachment(
+  attachment: Zotero.Item,
+  options: MineruSourceProvenanceWriteOptions = {},
+): Promise<MineruSourceProvenance> {
+  const provenance = await buildMineruSourceProvenance(attachment, options);
+  await writeMineruSourceProvenance(attachment.id, provenance);
+  return provenance;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

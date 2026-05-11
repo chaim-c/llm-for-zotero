@@ -1,10 +1,14 @@
 import { assert } from "chai";
 import {
+  MINERU_SOURCE_PROVENANCE_KIND,
+  MINERU_SOURCE_PROVENANCE_VERSION,
   normalizeMineruCacheFiles,
   readCachedMineruMd,
+  readMineruSourceProvenance,
   readManifest,
   readMineruImageAsBase64,
   writeMineruCacheFiles,
+  writeMineruSourceProvenanceForAttachment,
   type MineruCacheFile,
 } from "../src/modules/contextPanel/mineruCache";
 
@@ -311,6 +315,98 @@ describe("mineruCache", function () {
     assert.match(
       await readMineruImageAsBase64(7, "images/a.png"),
       /^data:image\/png;base64,/,
+    );
+  });
+
+  it("writes lightweight parsed source metadata without fingerprinting the PDF", async function () {
+    const io = setupMemoryIO();
+    const pdfPath = "/tmp/zotero/storage/42/paper.pdf";
+    const parent = {
+      id: 10,
+      key: "PARENTKEY",
+      isRegularItem: () => true,
+      isAttachment: () => false,
+      getAttachments: () => [42],
+    };
+    const pdf = {
+      id: 42,
+      key: "PDFKEY",
+      parentID: 10,
+      attachmentFilename: "paper.pdf",
+      attachmentContentType: "application/pdf",
+      isRegularItem: () => false,
+      isAttachment: () => true,
+      getFilePathAsync: async () => {
+        throw new Error("source metadata should not read PDF bytes");
+      },
+    };
+    (globalThis as any).Zotero.Items = {
+      get: (id: number) => (id === 10 ? parent : id === 42 ? pdf : null),
+    };
+    io.files.set(normalizePath(pdfPath), bytes([1, 2, 3, 4, 5]));
+
+    await writeMineruCacheFiles(42, "# Intro", []);
+    const written = await writeMineruSourceProvenanceForAttachment(
+      pdf as unknown as Zotero.Item,
+    );
+
+    const raw = JSON.parse(
+      decoder.decode(
+        io.files.get(
+          normalizePath(
+            "/tmp/zotero/llm-for-zotero-mineru/42/_llm_source.json",
+          ),
+        )!,
+      ),
+    );
+    assert.equal(raw.kind, MINERU_SOURCE_PROVENANCE_KIND);
+    assert.equal(raw.version, MINERU_SOURCE_PROVENANCE_VERSION);
+    assert.equal(raw.origin, "parsed");
+    assert.equal(raw.parsedAt, raw.recordedAt);
+    assert.notProperty(raw, "sourceFingerprint");
+    assert.notProperty(raw, "provenanceStatus");
+
+    const provenance = await readMineruSourceProvenance(42);
+    assert.deepEqual(provenance, written);
+    assert.equal(provenance?.attachmentKey, "PDFKEY");
+    assert.equal(provenance?.parentItemKey, "PARENTKEY");
+  });
+
+  it("reads legacy source metadata without preserving fingerprint state", async function () {
+    const io = setupMemoryIO();
+    io.files.set(
+      normalizePath("/tmp/zotero/llm-for-zotero-mineru/51/_llm_source.json"),
+      bytes(
+        JSON.stringify({
+          attachmentId: 51,
+          attachmentKey: "PDFMETA",
+          sourceFilename: "original.pdf",
+          sourceFingerprint: {
+            kind: "file-chunk-hash",
+            value: "fnv1a32-legacy",
+            size: 4,
+            strong: true,
+          },
+          provenanceStatus: "legacy_unverified",
+          parsedAt: "2020-01-01T00:00:00.000Z",
+        }),
+      ),
+    );
+
+    const provenance = await readMineruSourceProvenance(51);
+
+    assert.equal(provenance?.kind, MINERU_SOURCE_PROVENANCE_KIND);
+    assert.equal(provenance?.version, MINERU_SOURCE_PROVENANCE_VERSION);
+    assert.equal(provenance?.origin, "parsed");
+    assert.equal(provenance?.recordedAt, "2020-01-01T00:00:00.000Z");
+    assert.equal(provenance?.parsedAt, "2020-01-01T00:00:00.000Z");
+    assert.notProperty(
+      provenance as Record<string, unknown>,
+      "sourceFingerprint",
+    );
+    assert.notProperty(
+      provenance as Record<string, unknown>,
+      "provenanceStatus",
     );
   });
 

@@ -59,6 +59,7 @@ export interface Message {
   collectionContextsExpanded?: boolean;
   paperContextsExpanded?: boolean;
   attachments?: ChatAttachment[];
+  modelAttachments?: ChatAttachment[];
   attachmentsExpanded?: boolean;
   attachmentActiveIndex?: number;
   screenshotExpanded?: boolean;
@@ -337,7 +338,10 @@ export type SendQuestionOptions = {
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   selectedCollectionContexts?: CollectionContextRef[];
+  /** Attachments shown in chat history. */
   attachments?: ChatAttachment[];
+  /** Provider-resolved attachments sent to the model. Defaults to `attachments`. */
+  modelAttachments?: ChatAttachment[];
   runtimeMode?: ChatRuntimeMode;
   agentRunId?: string;
   skipAgentDispatch?: boolean;
@@ -365,7 +369,10 @@ export type EditRetryOptions = {
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   selectedCollectionContexts?: CollectionContextRef[];
+  /** Attachments shown in chat history. */
   attachments?: ChatAttachment[];
+  /** Provider-resolved attachments sent to the retry request. Defaults to `attachments`. */
+  modelAttachments?: ChatAttachment[];
   pdfUploadSystemMessages?: string[];
   targetRuntimeMode?: ChatRuntimeMode;
   expected?: { conversationKey: number; userTimestamp: number; assistantTimestamp: number };

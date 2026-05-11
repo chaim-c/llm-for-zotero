@@ -53,6 +53,9 @@ import {
   isCodexZoteroMcpToolsEnabled,
 } from "../../codexAppServer/prefs";
 import {
+  getEffectiveCodexAppServerBinaryPath,
+} from "../../codexAppServer/binaryPath";
+import {
   resolveCodexNativeApprovalRequest,
   runCodexAppServerNativeTurn,
   type CodexNativeConversationScope,
@@ -181,7 +184,7 @@ import {
   resolvePaperContextRefFromItem,
 } from "./paperAttribution";
 import { buildPaperKey } from "./pdfContext";
-import { isTextOnlyModel } from "../../providers/modelChecks";
+import { isTextOnlyModel, resolveProviderCapabilities } from "../../providers";
 import {
   getActiveContextAttachmentFromTabs,
   resolveContextSourceItem,
@@ -1182,6 +1185,17 @@ function toPanelMessage(message: StoredChatMessage): Message {
           Boolean(entry.name.trim()),
       )
     : undefined;
+  const modelAttachments = Array.isArray(message.modelAttachments)
+    ? message.modelAttachments.filter(
+        (entry) =>
+          Boolean(entry) &&
+          typeof entry === "object" &&
+          typeof entry.id === "string" &&
+          Boolean(entry.id.trim()) &&
+          typeof entry.name === "string" &&
+          Boolean(entry.name.trim()),
+      )
+    : undefined;
   const selectedTexts = normalizeSelectedTexts(
     message.selectedTexts,
     message.selectedText,
@@ -1238,6 +1252,7 @@ function toPanelMessage(message: StoredChatMessage): Message {
     paperContextsExpanded: false,
     screenshotImages,
     attachments,
+    modelAttachments,
     attachmentsExpanded: false,
     screenshotExpanded: false,
     screenshotActiveIndex: screenshotImages?.length ? 0 : undefined,
@@ -3413,6 +3428,236 @@ function normalizeEditableAttachments(
   }));
 }
 
+function getPdfPaperAttachmentContextItemId(
+  attachment: ChatAttachment,
+): number | null {
+  if (typeof attachment.id !== "string") return null;
+  const match = attachment.id.match(/^pdf-(?:paper|page)-(\d+)-/);
+  if (!match) return null;
+  const contextItemId = Number(match[1]);
+  return Number.isFinite(contextItemId) && contextItemId > 0
+    ? Math.floor(contextItemId)
+    : null;
+}
+
+function isSameRetryModelTarget(params: {
+  userMessage: Message;
+  previousAssistant?: Pick<
+    Message,
+    "modelName" | "modelEntryId" | "modelProviderLabel"
+  >;
+  effectiveRequestConfig: EffectiveRequestConfig;
+}): boolean {
+  const storedEntryId =
+    params.userMessage.modelEntryId || params.previousAssistant?.modelEntryId;
+  if (storedEntryId && params.effectiveRequestConfig.modelEntryId) {
+    return storedEntryId === params.effectiveRequestConfig.modelEntryId;
+  }
+  const storedModel = (
+    params.userMessage.modelName ||
+    params.previousAssistant?.modelName ||
+    ""
+  ).trim();
+  const targetModel = (params.effectiveRequestConfig.model || "").trim();
+  if (storedModel && targetModel && storedModel !== targetModel) return false;
+  const storedProvider = (
+    params.userMessage.modelProviderLabel ||
+    params.previousAssistant?.modelProviderLabel ||
+    ""
+  ).trim();
+  const targetProvider = (
+    params.effectiveRequestConfig.modelProviderLabel || ""
+  ).trim();
+  if (storedProvider && targetProvider && storedProvider !== targetProvider) {
+    return false;
+  }
+  return Boolean(storedEntryId || storedModel || storedProvider);
+}
+
+function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize)),
+    );
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+async function renderRetryPdfPaperImages(params: {
+  attachments: ChatAttachment[];
+  existingImages: string[];
+  maxImages: number;
+}): Promise<string[]> {
+  const contextItemIds = Array.from(
+    new Set(
+      params.attachments
+        .map(getPdfPaperAttachmentContextItemId)
+        .filter((id): id is number => id !== null),
+    ),
+  );
+  if (!contextItemIds.length) return [];
+  const remaining = Math.max(
+    0,
+    Math.floor(params.maxImages) - params.existingImages.length,
+  );
+  if (remaining <= 0) return [];
+  const [{ renderAllPdfPages }, { readAttachmentBytes }] = await Promise.all([
+    import("../../agent/services/pdfPageService"),
+    import("./attachmentStorage"),
+  ]);
+  const images: string[] = [];
+  for (const contextItemId of contextItemIds) {
+    if (images.length >= remaining) break;
+    const pages = await renderAllPdfPages(contextItemId, {
+      maxPages: remaining - images.length,
+    });
+    for (const page of pages) {
+      if (images.length >= remaining) break;
+      const bytes = await readAttachmentBytes(page.storedPath);
+      if (bytes.byteLength > 0) {
+        images.push(bytesToDataUrl(bytes, "image/png"));
+      }
+    }
+  }
+  return images;
+}
+
+async function resolveRetryModelInputs(params: {
+  userMessage: Message;
+  previousAssistant?: Pick<
+    Message,
+    "modelName" | "modelEntryId" | "modelProviderLabel"
+  >;
+  visibleAttachments: ChatAttachment[];
+  screenshotImages: string[];
+  modelAttachmentsOverride?: ChatAttachment[];
+  effectiveRequestConfig: EffectiveRequestConfig;
+}): Promise<{
+  modelAttachments?: ChatAttachment[];
+  screenshotImages: string[];
+  pdfUploadSystemMessages?: string[];
+}> {
+  if (params.modelAttachmentsOverride !== undefined) {
+    return {
+      modelAttachments: params.modelAttachmentsOverride,
+      screenshotImages: params.screenshotImages,
+    };
+  }
+  const visibleAttachments = normalizeEditableAttachments(
+    params.visibleAttachments,
+  );
+  const pdfSupport = resolveProviderCapabilities({
+    model: params.effectiveRequestConfig.model,
+    protocol: params.effectiveRequestConfig.providerProtocol,
+    authMode: params.effectiveRequestConfig.authMode,
+    apiBase: params.effectiveRequestConfig.apiBase,
+  }).pdf;
+  const pdfPaperAttachments = visibleAttachments.filter(
+    (attachment) => getPdfPaperAttachmentContextItemId(attachment) !== null,
+  );
+  if (
+    pdfSupport !== "upload" &&
+    Array.isArray(params.userMessage.modelAttachments) &&
+    isSameRetryModelTarget({
+      userMessage: params.userMessage,
+      previousAssistant: params.previousAssistant,
+      effectiveRequestConfig: params.effectiveRequestConfig,
+    })
+  ) {
+    return {
+      modelAttachments: params.userMessage.modelAttachments,
+      screenshotImages: params.screenshotImages,
+    };
+  }
+
+  if (!visibleAttachments.length) {
+    return { screenshotImages: params.screenshotImages };
+  }
+
+  const modelAttachments =
+    pdfSupport === "none"
+      ? visibleAttachments.filter((attachment) => attachment.category !== "pdf")
+      : pdfSupport === "vision" || pdfSupport === "upload"
+        ? visibleAttachments.filter(
+            (attachment) =>
+              getPdfPaperAttachmentContextItemId(attachment) === null,
+          )
+        : visibleAttachments;
+  const pdfUploadSystemMessages: string[] = [];
+  if (pdfSupport === "upload" && pdfPaperAttachments.length) {
+    const missingStoredPath = pdfPaperAttachments.find(
+      (attachment) => !(attachment.storedPath || "").trim(),
+    );
+    if (missingStoredPath) {
+      const name =
+        typeof missingStoredPath.name === "string" &&
+        missingStoredPath.name.trim()
+          ? missingStoredPath.name.trim()
+          : "the PDF";
+      throw new Error(
+        `Cannot retry PDF upload because ${name} is missing its locally persisted PDF. Re-send the paper or switch models.`,
+      );
+    }
+    const apiBase = (params.effectiveRequestConfig.apiBase || "").trim();
+    const apiKey = (params.effectiveRequestConfig.apiKey || "").trim();
+    if (!apiBase || !apiKey) {
+      throw new Error("PDF upload requires a configured provider API key.");
+    }
+    const [{ detectPdfUploadProvider, uploadPdfForProvider }, { readAttachmentBytes }] =
+      await Promise.all([
+        import("../../utils/pdfUploadPreprocessor"),
+        import("./attachmentStorage"),
+      ]);
+    const provider = detectPdfUploadProvider(apiBase);
+    for (const attachment of pdfPaperAttachments) {
+      const storedPath = (attachment.storedPath || "").trim();
+      const result = await uploadPdfForProvider({
+        provider,
+        apiBase,
+        apiKey,
+        pdfBytes: await readAttachmentBytes(storedPath),
+        fileName:
+          typeof attachment.name === "string" && attachment.name.trim()
+            ? attachment.name.trim()
+            : "document.pdf",
+      });
+      if (!result) {
+        throw new Error("PDF upload failed.");
+      }
+      pdfUploadSystemMessages.push(result.systemMessageContent);
+    }
+  }
+  let screenshotImages = params.screenshotImages;
+  if (
+    pdfSupport === "vision" &&
+    modelAttachments.length !== visibleAttachments.length
+  ) {
+    const rendered = await renderRetryPdfPaperImages({
+      attachments: visibleAttachments,
+      existingImages: screenshotImages,
+      maxImages: MAX_SELECTED_IMAGES,
+    });
+    if (rendered.length) {
+      screenshotImages = [...screenshotImages, ...rendered].slice(
+        0,
+        MAX_SELECTED_IMAGES,
+      );
+    }
+  }
+
+  return {
+    modelAttachments,
+    screenshotImages,
+    pdfUploadSystemMessages: pdfUploadSystemMessages.length
+      ? pdfUploadSystemMessages
+      : undefined,
+  };
+}
+
+export const resolveRetryModelInputsForTests = resolveRetryModelInputs;
+
 function normalizeEditablePaperContexts(
   paperContexts?: PaperContextRef[],
 ): PaperContextRef[] {
@@ -3605,6 +3850,7 @@ export async function editLatestUserMessageAndRetry(
     fullTextPaperContexts,
     selectedCollectionContexts,
     attachments,
+    modelAttachments,
     pdfUploadSystemMessages,
     targetRuntimeMode,
     expected,
@@ -3762,6 +4008,17 @@ export async function editLatestUserMessageAndRetry(
   retryPair.userMessage.attachments = attachmentsForMessage.length
     ? attachmentsForMessage
     : undefined;
+  if (modelAttachments !== undefined) {
+    retryPair.userMessage.modelAttachments = normalizeEditableAttachments(
+      modelAttachments,
+    );
+  } else {
+    retryPair.userMessage.modelAttachments = undefined;
+  }
+  retryPair.userMessage.modelName = retryRequestConfig.model;
+  retryPair.userMessage.modelEntryId = retryRequestConfig.modelEntryId;
+  retryPair.userMessage.modelProviderLabel =
+    retryRequestConfig.modelProviderLabel;
   retryPair.userMessage.attachmentsExpanded = false;
   retryPair.userMessage.attachmentActiveIndex = undefined;
 
@@ -3783,6 +4040,10 @@ export async function editLatestUserMessageAndRetry(
       selectedCollectionContexts:
         retryPair.userMessage.selectedCollectionContexts,
       attachments: retryPair.userMessage.attachments,
+      modelAttachments: retryPair.userMessage.modelAttachments,
+      modelName: retryPair.userMessage.modelName,
+      modelEntryId: retryPair.userMessage.modelEntryId,
+      modelProviderLabel: retryPair.userMessage.modelProviderLabel,
     });
 
     const storedMessages = await loadStoredConversationByKey(
@@ -3814,6 +4075,7 @@ export async function editLatestUserMessageAndRetry(
       modelProviderLabel,
       reasoning,
       advanced,
+      modelAttachments,
     );
   } else {
     await retryLatestAssistantResponse(
@@ -3829,6 +4091,7 @@ export async function editLatestUserMessageAndRetry(
       reasoning,
       advanced,
       pdfUploadSystemMessages,
+      modelAttachments,
     );
   }
   return "ok";
@@ -3852,6 +4115,7 @@ export async function retryLatestAssistantResponse(
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
   pdfUploadSystemMessages?: string[],
+  modelAttachmentsOverride?: ChatAttachment[],
 ) {
   const ui = getPanelRequestUI(body);
 
@@ -3988,10 +4252,51 @@ export async function retryLatestAssistantResponse(
       return;
     }
   }
-  const requestFileAttachments = normalizeModelFileAttachments(attachments, {
-    authMode: effectiveRequestConfig.authMode,
-    runtimeMode: "chat",
-  });
+  let retryScreenshotImages = screenshotImages;
+  let requestFileAttachments: ChatFileAttachment[] = [];
+  let retryPdfUploadSystemMessages: string[] = [];
+  try {
+    const retryModelInputs = await resolveRetryModelInputs({
+      userMessage: retryPair.userMessage,
+      previousAssistant: assistantSnapshot,
+      visibleAttachments: attachments,
+      screenshotImages,
+      modelAttachmentsOverride,
+      effectiveRequestConfig,
+    });
+    retryScreenshotImages = retryModelInputs.screenshotImages;
+    retryPair.userMessage.screenshotImages = retryScreenshotImages.length
+      ? retryScreenshotImages
+      : undefined;
+    if (retryModelInputs.modelAttachments !== undefined) {
+      retryPair.userMessage.modelAttachments =
+        retryModelInputs.modelAttachments;
+    }
+    retryPair.userMessage.modelName = effectiveRequestConfig.model;
+    retryPair.userMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
+    retryPair.userMessage.modelProviderLabel =
+      effectiveRequestConfig.modelProviderLabel;
+    requestFileAttachments = normalizeModelFileAttachments(
+      retryModelInputs.modelAttachments ?? attachments,
+      {
+        authMode: effectiveRequestConfig.authMode,
+        runtimeMode: "chat",
+      },
+    );
+    retryPdfUploadSystemMessages = [
+      ...(pdfUploadSystemMessages || []),
+      ...(retryModelInputs.pdfUploadSystemMessages || []),
+    ];
+  } catch (err) {
+    restoreOriginalAssistant();
+    restoreRequestUIIdle(body, conversationKey, thisRequestId);
+    const message =
+      err instanceof Error && err.message.trim()
+        ? err.message
+        : "Could not prepare retry attachments.";
+    setStatusSafely(message, "error");
+    return;
+  }
 
   try {
     const llmHistory = buildLLMHistoryMessages(historyForLLM);
@@ -4020,7 +4325,7 @@ export async function retryLatestAssistantResponse(
       : await buildContextPlanForRequest({
           item,
           question,
-          images: screenshotImages,
+          images: retryScreenshotImages,
           selectedTextSources: retryPair.userMessage.selectedTextSources,
           paperContexts: retryPaperContexts,
           fullTextPaperContexts: retryFullTextPaperContexts,
@@ -4029,7 +4334,9 @@ export async function retryLatestAssistantResponse(
           history: llmHistory,
           effectiveRequestConfig,
           pdfModePaperKeys: retryPdfKeys.size > 0 ? retryPdfKeys : undefined,
-          pdfUploadSystemMessages,
+          pdfUploadSystemMessages: retryPdfUploadSystemMessages.length
+            ? retryPdfUploadSystemMessages
+            : undefined,
           signal: getAbortController(conversationKey)?.signal,
           setStatusSafely,
         });
@@ -4066,6 +4373,10 @@ export async function retryLatestAssistantResponse(
       selectedCollectionContexts:
         retryPair.userMessage.selectedCollectionContexts,
       attachments: retryPair.userMessage.attachments,
+      modelAttachments: retryPair.userMessage.modelAttachments,
+      modelName: retryPair.userMessage.modelName,
+      modelEntryId: retryPair.userMessage.modelEntryId,
+      modelProviderLabel: retryPair.userMessage.modelProviderLabel,
     });
     if (getCancelledRequestId(conversationKey) >= thisRequestId) {
       getAbortController(conversationKey)?.abort();
@@ -4086,7 +4397,10 @@ export async function retryLatestAssistantResponse(
     // Text-only models (e.g. DeepSeek) reject image_url content — drop all images.
     const allImages = isTextOnlyModel(effectiveRequestConfig.model || "")
       ? []
-      : [...(screenshotImages || []), ...(contextPlan.mineruImages || [])];
+      : [
+          ...(retryScreenshotImages || []),
+          ...(contextPlan.mineruImages || []),
+        ];
     const requestParams = {
       prompt: question,
       context: combinedContext,
@@ -4186,7 +4500,9 @@ export async function retryLatestAssistantResponse(
             messages: finalPrepared.messages,
             reasoning: effectiveRequestConfig.reasoning,
             signal: getAbortController(conversationKey)?.signal,
-            codexPath: effectiveRequestConfig.apiBase,
+            codexPath: getEffectiveCodexAppServerBinaryPath(
+              effectiveRequestConfig.apiBase,
+            ),
             skillContext: buildCodexNativeSkillContext({
               selectedTexts: retryPair.userMessage.selectedTexts,
               selectedTextSources: retryPair.userMessage.selectedTextSources,
@@ -4400,6 +4716,7 @@ export async function editUserTurnAndRetry(opts: {
   fullTextPaperContexts?: PaperContextRef[];
   selectedCollectionContexts?: CollectionContextRef[];
   attachments?: ChatAttachment[];
+  modelAttachments?: ChatAttachment[];
   pdfUploadSystemMessages?: string[];
   targetRuntimeMode?: ChatRuntimeMode;
   model?: string;
@@ -4432,6 +4749,7 @@ export async function editUserTurnAndRetry(opts: {
     fullTextPaperContexts,
     selectedCollectionContexts,
     attachments,
+    modelAttachments,
     pdfUploadSystemMessages,
     targetRuntimeMode,
     model,
@@ -4616,6 +4934,14 @@ export async function editUserTurnAndRetry(opts: {
   userMsg.attachments = attachmentsForMessage.length
     ? attachmentsForMessage
     : undefined;
+  if (modelAttachments !== undefined) {
+    userMsg.modelAttachments = normalizeEditableAttachments(modelAttachments);
+  } else {
+    userMsg.modelAttachments = undefined;
+  }
+  userMsg.modelName = retryRequestConfig.model;
+  userMsg.modelEntryId = retryRequestConfig.modelEntryId;
+  userMsg.modelProviderLabel = retryRequestConfig.modelProviderLabel;
   userMsg.attachmentsExpanded = false;
   userMsg.attachmentActiveIndex = undefined;
 
@@ -4636,6 +4962,10 @@ export async function editUserTurnAndRetry(opts: {
       citationPaperContexts: getMessageCitationPaperContexts(userMsg),
       selectedCollectionContexts: userMsg.selectedCollectionContexts,
       attachments: userMsg.attachments,
+      modelAttachments: userMsg.modelAttachments,
+      modelName: userMsg.modelName,
+      modelEntryId: userMsg.modelEntryId,
+      modelProviderLabel: userMsg.modelProviderLabel,
     });
   } catch (err) {
     ztoolkit.log("LLM: Failed to persist edited user message", err);
@@ -4657,6 +4987,7 @@ export async function editUserTurnAndRetry(opts: {
       retryRequestConfig.modelProviderLabel,
       retryRequestConfig.reasoning,
       retryRequestConfig.advanced,
+      modelAttachments,
     );
   } else {
     await retryLatestAssistantResponse(
@@ -4672,6 +5003,7 @@ export async function editUserTurnAndRetry(opts: {
       retryRequestConfig.reasoning,
       retryRequestConfig.advanced,
       pdfUploadSystemMessages,
+      modelAttachments,
     );
   }
 }
@@ -4910,6 +5242,7 @@ async function retryLatestAgentResponse(
   modelProviderLabel?: string,
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
+  modelAttachmentsOverride?: ChatAttachment[],
 ): Promise<void> {
   const conversationSystem = resolveEffectiveConversationSystem({
     item,
@@ -4929,6 +5262,7 @@ async function retryLatestAgentResponse(
     modelProviderLabel,
     reasoning,
     advanced,
+    modelAttachmentsOverride,
     buildAgentEngineDeps(item, conversationSystem),
   );
 }
@@ -4961,6 +5295,7 @@ async function sendAgentQuestion(opts: {
   fullTextPaperContexts?: PaperContextRef[];
   selectedCollectionContexts?: CollectionContextRef[];
   attachments?: ChatAttachment[];
+  modelAttachments?: ChatAttachment[];
   pdfModePaperKeys?: Set<string>;
   forcedSkillIds?: string[];
   pdfUploadSystemMessages?: string[];
@@ -4994,6 +5329,7 @@ export async function sendQuestion(
     fullTextPaperContexts,
     selectedCollectionContexts,
     attachments,
+    modelAttachments,
     runtimeMode = "chat",
     agentRunId,
     skipAgentDispatch = false,
@@ -5035,6 +5371,7 @@ export async function sendQuestion(
       fullTextPaperContexts,
       selectedCollectionContexts,
       attachments,
+      modelAttachments,
       pdfModePaperKeys,
       forcedSkillIds: opts.forcedSkillIds,
       pdfUploadSystemMessages: opts.pdfUploadSystemMessages,
@@ -5141,10 +5478,13 @@ export async function sendQuestion(
   const isCodexNativeTurn =
     effectiveConversationSystem === "codex" &&
     effectiveRequestConfig.authMode === "codex_app_server";
-  const requestFileAttachments = normalizeModelFileAttachments(attachments, {
-    authMode: effectiveRequestConfig.authMode,
-    runtimeMode: effectiveRuntimeMode,
-  });
+  const requestFileAttachments = normalizeModelFileAttachments(
+    modelAttachments ?? attachments,
+    {
+      authMode: effectiveRequestConfig.authMode,
+      runtimeMode: effectiveRuntimeMode,
+    },
+  );
   const selectedTextsForMessage = normalizeSelectedTexts(selectedTexts);
   const selectedTextSourcesForMessage = normalizeSelectedTextSources(
     selectedTextSources,
@@ -5247,7 +5587,13 @@ export async function sendQuestion(
     screenshotExpanded: false,
     screenshotActiveIndex: 0,
     attachments: attachments?.length ? attachments : undefined,
+    modelName: effectiveRequestConfig.model,
+    modelEntryId: effectiveRequestConfig.modelEntryId,
+    modelProviderLabel: effectiveRequestConfig.modelProviderLabel,
   };
+  if (modelAttachments !== undefined) {
+    userMessage.modelAttachments = modelAttachments;
+  }
   if (reuseOptimisticPair) {
     history[history.length - 2] = userMessage;
   } else {
@@ -5269,6 +5615,10 @@ export async function sendQuestion(
     selectedCollectionContexts: userMessage.selectedCollectionContexts,
     screenshotImages: userMessage.screenshotImages,
     attachments: userMessage.attachments,
+    modelAttachments: userMessage.modelAttachments,
+    modelName: userMessage.modelName,
+    modelEntryId: userMessage.modelEntryId,
+    modelProviderLabel: userMessage.modelProviderLabel,
   });
 
   const assistantMessage: Message = {
@@ -5516,6 +5866,10 @@ export async function sendQuestion(
       citationPaperContexts: userMessage.citationPaperContexts,
       selectedCollectionContexts: userMessage.selectedCollectionContexts,
       attachments: userMessage.attachments,
+      modelAttachments: userMessage.modelAttachments,
+      modelName: userMessage.modelName,
+      modelEntryId: userMessage.modelEntryId,
+      modelProviderLabel: userMessage.modelProviderLabel,
     });
 
     if (getCancelledRequestId(conversationKey) >= thisRequestId) {
@@ -5633,7 +5987,9 @@ export async function sendQuestion(
             messages: finalPrepared.messages,
             reasoning: effectiveRequestConfig.reasoning,
             signal: getAbortController(conversationKey)?.signal,
-            codexPath: effectiveRequestConfig.apiBase,
+            codexPath: getEffectiveCodexAppServerBinaryPath(
+              effectiveRequestConfig.apiBase,
+            ),
             skillContext: buildCodexNativeSkillContext({
               forcedSkillIds: opts.forcedSkillIds,
               selectedTexts: selectedTextsForMessage,

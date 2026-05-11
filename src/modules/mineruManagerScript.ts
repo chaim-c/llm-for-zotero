@@ -21,6 +21,7 @@ import { getMineruItemDir } from "./contextPanel/mineruCache";
 import {
   getMineruStatus,
   onProcessingStatusChange,
+  type MineruStatus,
 } from "./mineruProcessingStatus";
 import {
   getAutoWatchStatus,
@@ -28,13 +29,21 @@ import {
   resumeAutoWatch,
   onAutoWatchProgress,
 } from "./mineruAutoWatch";
-import { getMineruAvailabilityForAttachmentId } from "./contextPanel/mineruSync";
+import {
+  getMineruAvailabilityForAttachmentId,
+  repairMineruCaches,
+  type MineruCacheRepairResult,
+} from "./contextPanel/mineruSync";
 
 /** Show a confirm dialog with a custom title using ztoolkit.Dialog. */
 async function confirmDialog(message: string): Promise<boolean> {
   const dialogData: { [key: string]: unknown } = {
-    loadCallback: () => { return; },
-    unloadCallback: () => { return; },
+    loadCallback: () => {
+      return;
+    },
+    unloadCallback: () => {
+      return;
+    },
   };
   new ztoolkit.Dialog(1, 1)
     .addCell(0, 0, {
@@ -47,7 +56,8 @@ async function confirmDialog(message: string): Promise<boolean> {
     .addButton("Cancel", "cancel")
     .setDialogData(dialogData)
     .open(t("Delete confirmation"));
-  await (dialogData as { unloadLock: { promise: Promise<void> } }).unloadLock.promise;
+  await (dialogData as { unloadLock: { promise: Promise<void> } }).unloadLock
+    .promise;
   return (dialogData as { _lastButtonId?: string })._lastButtonId === "ok";
 }
 
@@ -87,6 +97,41 @@ const MIN_COLUMN_WIDTHS = {
   year: 34,
   dateAdded: 64,
 } as const;
+const MINERU_STATUS_DOT_COLORS: Record<MineruStatus, string> = {
+  cached: "#10b981",
+  processing: "#f59e0b",
+  failed: "#ef4444",
+  idle: "#d1d5db",
+};
+
+export type MineruParentStatusChild = Pick<
+  MineruItemEntry,
+  "availability" | "excluded"
+> & {
+  status: MineruStatus;
+};
+
+export function getMineruParentDisplayStatus(
+  children: readonly MineruParentStatusChild[],
+): MineruStatus {
+  const actionableChildren = children.filter((child) => !child.excluded);
+  if (!actionableChildren.length) return "idle";
+
+  if (actionableChildren.some((child) => child.status === "processing")) {
+    return "processing";
+  }
+  if (actionableChildren.some((child) => child.status === "failed")) {
+    return "failed";
+  }
+  if (
+    actionableChildren.every(
+      (child) => child.status === "cached" || child.availability !== "missing",
+    )
+  ) {
+    return "cached";
+  }
+  return "idle";
+}
 
 export async function registerMineruManagerScript(
   win: Window,
@@ -100,6 +145,7 @@ export async function registerMineruManagerScript(
   const progressLabel = $("progress-label") as HTMLSpanElement | null;
   const statusEl = $("status") as HTMLDivElement | null;
   const startBtn = $("start-btn") as HTMLButtonElement | null;
+  const repairBtn = $("repair-btn") as HTMLButtonElement | null;
   const deleteBtn = $("delete-btn") as HTMLButtonElement | null;
   const errorSpan = $("error") as HTMLSpanElement | null;
   const sidebar = $("sidebar") as HTMLDivElement | null;
@@ -126,6 +172,7 @@ export async function registerMineruManagerScript(
   let localTotalCount = 0;
   let localProcessedCount = 0;
   const collapsedSidebar = new Set<number>();
+  let isRepairing = false;
 
   // Sorting
   let sortKey: SortKey = "dateAdded";
@@ -155,8 +202,23 @@ export async function registerMineruManagerScript(
     }
   }
 
+  function formatRepairSummary(result: MineruCacheRepairResult): string {
+    return `Checked ${result.checked} PDFs. Restored ${result.restored}. Removed: ${result.removedOrphanCaches} orphan caches, ${result.removedOrphanSyncPackages} orphan sync packages. Failed ${result.failed}.`;
+  }
+
   function isMineruAvailable(item: MineruItemEntry): boolean {
     return item.availability !== "missing";
+  }
+
+  function getAvailabilityDisplayStatus(item: MineruItemEntry): MineruStatus {
+    return isMineruAvailable(item) ? "cached" : "idle";
+  }
+
+  function setDotDisplayStatus(
+    dot: HTMLSpanElement,
+    status: MineruStatus,
+  ): void {
+    dot.style.background = MINERU_STATUS_DOT_COLORS[status];
   }
 
   function getAvailabilityTooltip(item: MineruItemEntry): string {
@@ -177,19 +239,22 @@ export async function registerMineruManagerScript(
   async function refreshEntryAvailability(attachmentId: number): Promise<void> {
     const entry = allItems.find((i) => i.attachmentId === attachmentId);
     if (!entry) return;
-    const availability =
-      await getMineruAvailabilityForAttachmentId(attachmentId, {
+    const availability = await getMineruAvailabilityForAttachmentId(
+      attachmentId,
+      {
         validateSyncedPackage: false,
-      });
+      },
+    );
     entry.localCached = availability.localCached;
     entry.syncedPackage = availability.syncedPackage;
     entry.availability = availability.status;
     entry.cached = availability.status !== "missing";
     const dot = dotElements.get(attachmentId);
     if (dot) {
-      dot.style.background = entry.cached ? "#10b981" : "#d1d5db";
+      setDotDisplayStatus(dot, await getMineruStatus(attachmentId));
       dot.title = getAvailabilityTooltip(entry);
     }
+    void updateParentDotForAttachment(attachmentId);
   }
 
   function getVisibleItems(): MineruItemEntry[] {
@@ -258,6 +323,7 @@ export async function registerMineruManagerScript(
     const inFolder = isSubfolder() || activeCollectionId === "unfiled";
 
     if (startBtn) {
+      startBtn.disabled = isRepairing;
       if ((s.running && !s.paused) || (aw.isProcessing && !aw.isPaused)) {
         startBtn.textContent = t("Pause");
       } else if (hasSelection) {
@@ -269,7 +335,15 @@ export async function registerMineruManagerScript(
       }
     }
 
+    if (repairBtn) {
+      repairBtn.disabled = isRepairing || s.running || aw.isProcessing;
+      repairBtn.textContent = isRepairing
+        ? t("Repairing...")
+        : t("Repair Cache");
+    }
+
     if (deleteBtn) {
+      deleteBtn.disabled = isRepairing;
       if (hasSelection) {
         deleteBtn.textContent = `${t("Delete Cache")} (${selectedIds.size})`;
       } else if (inFolder) {
@@ -492,7 +566,10 @@ export async function registerMineruManagerScript(
     return Math.max(0, getHeaderContentWidth() - fixedWidth - gapWidth);
   }
 
-  function startColumnResize(boundary: ResizeBoundary, event: MouseEvent): void {
+  function startColumnResize(
+    boundary: ResizeBoundary,
+    event: MouseEvent,
+  ): void {
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -512,10 +589,7 @@ export async function registerMineruManagerScript(
       let appliedDelta = rawDelta;
 
       if (boundary === "title|firstCreator") {
-        const minDelta = Math.min(
-          0,
-          MIN_COLUMN_WIDTHS.title - startTitleWidth,
-        );
+        const minDelta = Math.min(0, MIN_COLUMN_WIDTHS.title - startTitleWidth);
         const maxDelta = Math.max(
           0,
           startWidths.firstCreator - MIN_COLUMN_WIDTHS.firstCreator,
@@ -614,18 +688,13 @@ export async function registerMineruManagerScript(
       const placements = getHeaderHandlePlacements(key);
       for (const placement of placements) {
         const handleId = `${placement.boundary}:${placement.side}`;
-        if (
-          cell.querySelector(
-            `[data-mineru-resize-handle="${handleId}"]`,
-          )
-        ) {
+        if (cell.querySelector(`[data-mineru-resize-handle="${handleId}"]`)) {
           continue;
         }
 
         const handle = doc.createElement("span");
         handle.setAttribute("data-mineru-resize-handle", handleId);
-        handle.style.cssText =
-          `position: absolute; top: -4px; ${placement.side}: -6px; width: 12px; height: calc(100% + 8px); cursor: col-resize; z-index: 2;`;
+        handle.style.cssText = `position: absolute; top: -4px; ${placement.side}: -6px; width: 12px; height: calc(100% + 8px); cursor: col-resize; z-index: 2;`;
 
         const guide = doc.createElement("span");
         guide.style.cssText =
@@ -712,23 +781,75 @@ export async function registerMineruManagerScript(
   // Parent dot aggregation for multi-PDF items
   const parentDotElements = new Map<number, HTMLSpanElement>();
 
-  function updateParentDot(parentId: number, group: MineruParentGroup): void {
+  function getInitialParentDisplayStatus(
+    group: MineruParentGroup,
+  ): MineruStatus {
+    return getMineruParentDisplayStatus(
+      group.children.map((child) => ({
+        availability: child.availability,
+        excluded: child.excluded,
+        status: getAvailabilityDisplayStatus(child),
+      })),
+    );
+  }
+
+  async function getResolvedParentDisplayStatus(
+    group: MineruParentGroup,
+  ): Promise<MineruStatus> {
+    const childStatuses = await Promise.all(
+      group.children.map(async (child) => ({
+        availability: child.availability,
+        excluded: child.excluded,
+        status: await getMineruStatus(child.attachmentId),
+      })),
+    );
+    return getMineruParentDisplayStatus(childStatuses);
+  }
+
+  async function updateParentDot(
+    parentId: number,
+    group: MineruParentGroup,
+  ): Promise<void> {
     const parentDot = parentDotElements.get(parentId);
     if (!parentDot) return;
-    let hasProcessing = false;
-    let hasFailed = false;
-    let allGreen = true;
-    for (const child of group.children) {
-      const childDot = dotElements.get(child.attachmentId);
-      const bg = childDot?.style.background || "";
-      if (bg.includes("245, 158, 11") || bg === "#f59e0b") hasProcessing = true;
-      else if (bg.includes("239, 68, 68") || bg === "#ef4444") hasFailed = true;
-      if (!bg.includes("16, 185, 129") && bg !== "#10b981") allGreen = false;
+    const status = await getResolvedParentDisplayStatus(group);
+    if (parentDotElements.get(parentId) !== parentDot) return;
+    setDotDisplayStatus(parentDot, status);
+  }
+
+  function findRenderedGroupForAttachment(
+    attachmentId: number,
+  ): MineruParentGroup | null {
+    return (
+      getVisibleGroups().find((group) =>
+        group.children.some((child) => child.attachmentId === attachmentId),
+      ) || null
+    );
+  }
+
+  function markParentDotProcessingForAttachment(attachmentId: number): void {
+    const group = findRenderedGroupForAttachment(attachmentId);
+    if (!group) return;
+    const parentDot = parentDotElements.get(group.parentItemId);
+    if (parentDot) setDotDisplayStatus(parentDot, "processing");
+  }
+
+  function updateParentDotForAttachment(attachmentId: number): void {
+    const group = findRenderedGroupForAttachment(attachmentId);
+    if (group) void updateParentDot(group.parentItemId, group);
+  }
+
+  function refreshRenderedParentDots(): void {
+    for (const group of getVisibleGroups()) {
+      void updateParentDot(group.parentItemId, group);
     }
-    if (allGreen) parentDot.style.background = "#10b981";
-    else if (hasProcessing) parentDot.style.background = "#f59e0b";
-    else if (hasFailed) parentDot.style.background = "#ef4444";
-    else parentDot.style.background = "#d1d5db";
+  }
+
+  async function refreshAttachmentDot(
+    attachmentId: number,
+    dot: HTMLSpanElement,
+  ): Promise<void> {
+    setDotDisplayStatus(dot, await getMineruStatus(attachmentId));
   }
 
   /** Build a standard item row (reused for parent, child, and single-PDF rows). */
@@ -744,19 +865,16 @@ export async function registerMineruManagerScript(
     if (opts.isChild) row.style.borderBottomColor = "rgba(128,128,128,0.06)";
 
     const dot = doc.createElement("span");
-    dot.style.cssText = "width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;";
+    dot.style.cssText =
+      "width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;";
     setColumnWidthStyle(dot, "cached");
-    dot.style.background = isMineruAvailable(item) ? "#10b981" : "#d1d5db";
+    setDotDisplayStatus(dot, getAvailabilityDisplayStatus(item));
     dot.title = getAvailabilityTooltip(item);
     dotElements.set(item.attachmentId, dot);
     row.appendChild(dot);
 
     void (async () => {
-      const status = await getMineruStatus(item.attachmentId);
-      if (status === "cached") dot.style.background = "#10b981";
-      else if (status === "processing") dot.style.background = "#f59e0b";
-      else if (status === "failed") dot.style.background = "#ef4444";
-      else dot.style.background = "#d1d5db";
+      await refreshAttachmentDot(item.attachmentId, dot);
     })();
 
     const titleSpan = doc.createElement("span");
@@ -898,21 +1016,24 @@ export async function registerMineruManagerScript(
 
       // Aggregated status dot (before chevron)
       const parentDot = doc.createElement("span");
-      parentDot.style.cssText = "width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;";
+      parentDot.style.cssText =
+        "width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;";
       setColumnWidthStyle(parentDot, "cached");
 
       // Chevron (expand/collapse) — SVG triangle, after dot, before title
       const chev = doc.createElement("span");
-      chev.style.cssText =
-        `width: 12px; height: 12px; flex-shrink: 0; cursor: pointer; user-select: none; display: inline-flex; align-items: center; justify-content: center; margin-left: ${TITLE_CONTENT_OFFSET}px;`;
+      chev.style.cssText = `width: 12px; height: 12px; flex-shrink: 0; cursor: pointer; user-select: none; display: inline-flex; align-items: center; justify-content: center; margin-left: ${TITLE_CONTENT_OFFSET}px;`;
       const svgNS = "http://www.w3.org/2000/svg";
       const svg = doc.createElementNS(svgNS, "svg");
       svg.setAttribute("width", "8");
       svg.setAttribute("height", "8");
       svg.setAttribute("viewBox", "0 0 8 8");
-      svg.setAttribute("style", collapsed
-        ? "transform: rotate(0deg); transition: transform 0.1s;"
-        : "transform: rotate(90deg); transition: transform 0.1s;");
+      svg.setAttribute(
+        "style",
+        collapsed
+          ? "transform: rotate(0deg); transition: transform 0.1s;"
+          : "transform: rotate(90deg); transition: transform 0.1s;",
+      );
       const path = doc.createElementNS(svgNS, "path");
       path.setAttribute("d", "M2 1 L6 4 L2 7 Z");
       path.setAttribute("fill", "#888");
@@ -924,10 +1045,9 @@ export async function registerMineruManagerScript(
         else collapsedParents.add(group.parentItemId);
         renderItemsList();
       });
-      parentDot.style.background = group.children.every(isMineruAvailable)
-        ? "#10b981"
-        : "#d1d5db";
+      setDotDisplayStatus(parentDot, getInitialParentDisplayStatus(group));
       parentDotElements.set(group.parentItemId, parentDot);
+      void updateParentDot(group.parentItemId, group);
       parentRow.appendChild(parentDot);
       parentRow.appendChild(chev);
 
@@ -958,13 +1078,15 @@ export async function registerMineruManagerScript(
       parentRow.appendChild(authorSpan);
 
       const yearSpan = doc.createElement("span");
-      yearSpan.style.cssText = "flex: 0 0 40px; text-align: left; font-size: 11.5px; color: #888;";
+      yearSpan.style.cssText =
+        "flex: 0 0 40px; text-align: left; font-size: 11.5px; color: #888;";
       yearSpan.textContent = group.year;
       setColumnWidthStyle(yearSpan, "year");
       parentRow.appendChild(yearSpan);
 
       const dateSpan = doc.createElement("span");
-      dateSpan.style.cssText = "flex: 0 0 72px; text-align: right; font-size: 11px; color: #888;";
+      dateSpan.style.cssText =
+        "flex: 0 0 72px; text-align: right; font-size: 11px; color: #888;";
       dateSpan.textContent = fmtDate(group.dateAdded);
       setColumnWidthStyle(dateSpan, "dateAdded");
       parentRow.appendChild(dateSpan);
@@ -1005,8 +1127,7 @@ export async function registerMineruManagerScript(
           selectedIds.clear();
           for (const c of group.children) selectedIds.add(c.attachmentId);
         }
-        if (!isShift)
-          lastClickedId = group.children[0]?.attachmentId ?? null;
+        if (!isShift) lastClickedId = group.children[0]?.attachmentId ?? null;
         renderItemsList();
         updateButtons();
       });
@@ -1036,12 +1157,8 @@ export async function registerMineruManagerScript(
           const childDot = dotElements.get(child.attachmentId);
           if (childDot) {
             void (async () => {
-              const status = await getMineruStatus(child.attachmentId);
-              if (status === "cached") childDot.style.background = "#10b981";
-              else if (status === "processing") childDot.style.background = "#f59e0b";
-              else if (status === "failed") childDot.style.background = "#ef4444";
-              else childDot.style.background = "#d1d5db";
-              updateParentDot(group.parentItemId, group);
+              await refreshAttachmentDot(child.attachmentId, childDot);
+              void updateParentDot(group.parentItemId, group);
             })();
           }
 
@@ -1308,11 +1425,14 @@ export async function registerMineruManagerScript(
           el.style.background = "color-mix(in srgb, #f59e0b 15%, transparent)";
           // Also set dot to yellow
           const dot = dotElements.get(attId);
-          if (dot) dot.style.background = "#f59e0b";
+          if (dot) setDotDisplayStatus(dot, "processing");
         } else if (!selectedIds.has(attId)) {
           el.style.background = "";
         }
       }
+    }
+    if (s.currentItemId) {
+      markParentDotProcessingForAttachment(s.currentItemId);
     }
   }
 
@@ -1324,7 +1444,7 @@ export async function registerMineruManagerScript(
     } else if (lastSeenCurrentId !== null) {
       const failed = s.lastFailedItemId === lastSeenCurrentId;
       const dot = dotElements.get(lastSeenCurrentId);
-      if (dot) dot.style.background = failed ? "#ef4444" : "#10b981";
+      if (dot) setDotDisplayStatus(dot, failed ? "failed" : "cached");
       const entry = allItems.find((i) => i.attachmentId === lastSeenCurrentId);
       if (entry && !failed) {
         entry.localCached = true;
@@ -1333,6 +1453,7 @@ export async function registerMineruManagerScript(
         const currentDot = dotElements.get(entry.attachmentId);
         if (currentDot) currentDot.title = getAvailabilityTooltip(entry);
       }
+      updateParentDotForAttachment(lastSeenCurrentId);
       lastSeenCurrentId = null;
     }
   });
@@ -1347,8 +1468,9 @@ export async function registerMineruManagerScript(
     if (s.currentItemId) {
       const dot = dotElements.get(s.currentItemId);
       if (dot && dot.style.background !== "rgb(245, 158, 11)") {
-        dot.style.background = "#f59e0b";
+        setDotDisplayStatus(dot, "processing");
       }
+      markParentDotProcessingForAttachment(s.currentItemId);
     }
   }, 500);
   (win as unknown as { _mineruDotPoll?: number })._mineruDotPoll =
@@ -1358,6 +1480,7 @@ export async function registerMineruManagerScript(
   // ── Button handlers ────────────────────────────────────────────────────────
   if (startBtn) {
     startBtn.addEventListener("click", () => {
+      if (isRepairing) return;
       const s = getMineruBatchState();
       const aw = getAutoWatchStatus();
       // Pause batch processing if running
@@ -1392,8 +1515,62 @@ export async function registerMineruManagerScript(
     });
   }
 
+  if (repairBtn) {
+    repairBtn.addEventListener("click", async () => {
+      if (isRepairing) return;
+      const s = getMineruBatchState();
+      const aw = getAutoWatchStatus();
+      if (s.running || aw.isProcessing) return;
+
+      isRepairing = true;
+      selectedIds.clear();
+      lastClickedId = null;
+      if (statusEl) {
+        statusEl.textContent = t("Repairing MinerU cache...");
+        statusEl.title = statusEl.textContent;
+        statusEl.style.color = "";
+      }
+      updateButtons();
+
+      try {
+        const result = await repairMineruCaches({
+          onProgress: (progress) => {
+            if (!statusEl) return;
+            const msg = formatRepairSummary(progress);
+            statusEl.textContent = msg;
+            statusEl.title = msg;
+          },
+        });
+        await loadData();
+        renderSidebar();
+        renderColumnHeaders();
+        renderItemsList();
+        const msg = formatRepairSummary(result);
+        if (statusEl) {
+          statusEl.textContent = msg;
+          statusEl.title = msg;
+          statusEl.style.color = result.failed > 0 ? "#dc2626" : "";
+        }
+      } catch (error) {
+        const msg = `Repair failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        if (statusEl) {
+          statusEl.textContent = msg;
+          statusEl.title = msg;
+          statusEl.style.color = "#dc2626";
+        }
+        ztoolkit.log("LLM MinerU: repair failed", error);
+      } finally {
+        isRepairing = false;
+        updateButtons();
+      }
+    });
+  }
+
   if (deleteBtn) {
     deleteBtn.addEventListener("click", async () => {
+      if (isRepairing) return;
       if (selectedIds.size > 0) {
         if (
           !(await confirmDialog(
@@ -1556,17 +1733,9 @@ export async function registerMineruManagerScript(
   const unsubscribeProcessingStatus = onProcessingStatusChange(() => {
     void (async () => {
       for (const [attachmentId, dot] of dotElements.entries()) {
-        const status = await getMineruStatus(attachmentId);
-        if (status === "cached") {
-          dot.style.background = "#10b981";
-        } else if (status === "processing") {
-          dot.style.background = "#f59e0b";
-        } else if (status === "failed") {
-          dot.style.background = "#ef4444";
-        } else {
-          dot.style.background = "#d1d5db";
-        }
+        await refreshAttachmentDot(attachmentId, dot);
       }
+      refreshRenderedParentDots();
     })();
   });
 

@@ -499,6 +499,7 @@ export async function sendAgentTurn(
     fullTextPaperContexts?: PaperContextRef[];
     selectedCollectionContexts?: CollectionContextRef[];
     attachments?: ChatAttachment[];
+    modelAttachments?: ChatAttachment[];
     forcedSkillIds?: string[];
   },
   deps: AgentEngineDeps,
@@ -526,6 +527,7 @@ export async function sendAgentTurn(
     fullTextPaperContexts,
     selectedCollectionContexts,
     attachments,
+    modelAttachments,
     forcedSkillIds,
   } = opts;
   const conversationKey = deps.getConversationKey(item);
@@ -598,6 +600,9 @@ export async function sendAgentTurn(
       ? selectedCollectionContexts
       : undefined,
   };
+  if (modelAttachments !== undefined) {
+    userMessage.modelAttachments = modelAttachments;
+  }
   if (!isCompactCommand) {
     historyForRun.push(userMessage);
     await deps.persistConversationMessage(conversationKey, {
@@ -614,6 +619,7 @@ export async function sendAgentTurn(
       selectedCollectionContexts: userMessage.selectedCollectionContexts,
       screenshotImages: userMessage.screenshotImages,
       attachments: userMessage.attachments,
+      modelAttachments: userMessage.modelAttachments,
     });
   }
 
@@ -629,6 +635,9 @@ export async function sendAgentTurn(
     reasoning,
     advanced,
   });
+  userMessage.modelName = effectiveRequestConfig.model;
+  userMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
+  userMessage.modelProviderLabel = effectiveRequestConfig.modelProviderLabel;
   const assistantMessage: Message = {
     role: "assistant",
     text: "",
@@ -712,6 +721,10 @@ export async function sendAgentTurn(
       selectedCollectionContexts: userMessage.selectedCollectionContexts,
       screenshotImages: userMessage.screenshotImages,
       attachments: userMessage.attachments,
+      modelAttachments: userMessage.modelAttachments,
+      modelName: userMessage.modelName,
+      modelEntryId: userMessage.modelEntryId,
+      modelProviderLabel: userMessage.modelProviderLabel,
     });
   }
   const runtimeRequest = await deps.buildAgentRuntimeRequest({
@@ -724,7 +737,7 @@ export async function sendAgentTurn(
     paperContexts: paperContextsForMessage,
     fullTextPaperContexts: fullTextPaperContextsForMessage,
     selectedCollectionContexts,
-    attachments,
+    attachments: modelAttachments ?? attachments,
     screenshots: images,
     forcedSkillIds,
     effectiveRequestConfig,
@@ -761,6 +774,7 @@ export async function sendAgentTurn(
         fullTextPaperContexts,
         selectedCollectionContexts,
         attachments,
+        modelAttachments,
         runtimeMode: "agent",
         agentRunId: fallback.runId,
         skipAgentDispatch: true,
@@ -838,6 +852,10 @@ export async function sendAgentTurn(
             citationPaperContexts: userMessage.citationPaperContexts,
             selectedCollectionContexts: userMessage.selectedCollectionContexts,
             attachments: userMessage.attachments,
+            modelAttachments: userMessage.modelAttachments,
+            modelName: userMessage.modelName,
+            modelEntryId: userMessage.modelEntryId,
+            modelProviderLabel: userMessage.modelProviderLabel,
           });
         }
       },
@@ -946,6 +964,10 @@ export async function sendAgentTurn(
                   userMessage.selectedCollectionContexts,
                 screenshotImages: userMessage.screenshotImages,
                 attachments: userMessage.attachments,
+                modelAttachments: userMessage.modelAttachments,
+                modelName: userMessage.modelName,
+                modelEntryId: userMessage.modelEntryId,
+                modelProviderLabel: userMessage.modelProviderLabel,
               });
             }
             break;
@@ -1193,6 +1215,7 @@ export async function retryAgentTurn(
   modelProviderLabel: string | undefined,
   reasoning: LLMReasoningConfig | undefined,
   advanced: AdvancedModelParams | undefined,
+  modelAttachmentsOverride: ChatAttachment[] | undefined,
   deps: AgentEngineDeps,
 ): Promise<void> {
   const ui = deps.getPanelRequestUI(body);
@@ -1296,6 +1319,17 @@ export async function retryAgentTurn(
   const historyForLLM = deps.buildLLMHistoryMessages(
     history.slice(0, retryPair.userIndex),
   );
+  if (modelAttachmentsOverride !== undefined) {
+    retryPair.userMessage.modelAttachments = modelAttachmentsOverride;
+  }
+  retryPair.userMessage.modelName = effectiveRequestConfig.model;
+  retryPair.userMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
+  retryPair.userMessage.modelProviderLabel =
+    effectiveRequestConfig.modelProviderLabel;
+  const retryModelAttachments =
+    modelAttachmentsOverride ??
+    retryPair.userMessage.modelAttachments ??
+    retryPair.userMessage.attachments?.filter((a) => a.category !== "image");
 
   const runtimeRequest = await deps.buildAgentRuntimeRequest({
     conversationKey,
@@ -1307,9 +1341,7 @@ export async function retryAgentTurn(
     paperContexts,
     fullTextPaperContexts,
     selectedCollectionContexts,
-    attachments: retryPair.userMessage.attachments?.filter(
-      (a) => a.category !== "image",
-    ),
+    attachments: retryModelAttachments,
     screenshots: screenshotImages,
     effectiveRequestConfig,
     history: historyForLLM,
@@ -1386,6 +1418,10 @@ export async function retryAgentTurn(
           selectedCollectionContexts:
             retryPair.userMessage.selectedCollectionContexts,
           attachments: retryPair.userMessage.attachments,
+          modelAttachments: retryPair.userMessage.modelAttachments,
+          modelName: retryPair.userMessage.modelName,
+          modelEntryId: retryPair.userMessage.modelEntryId,
+          modelProviderLabel: retryPair.userMessage.modelProviderLabel,
         });
       },
       onEvent: async (event) => {
@@ -1500,6 +1536,10 @@ export async function retryAgentTurn(
                 retryPair.userMessage.selectedCollectionContexts,
               screenshotImages: retryPair.userMessage.screenshotImages,
               attachments: retryPair.userMessage.attachments,
+              modelAttachments: retryPair.userMessage.modelAttachments,
+              modelName: retryPair.userMessage.modelName,
+              modelEntryId: retryPair.userMessage.modelEntryId,
+              modelProviderLabel: retryPair.userMessage.modelProviderLabel,
             });
             break;
           }
