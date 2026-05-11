@@ -710,6 +710,17 @@ const zhCN: Record<string, string> = {
   "Failed to load selected conversation": "加载选中的对话失败",
   "Failed to load skills": "加载技能失败",
   "No matching history": "没有匹配的历史",
+  "Paper context removed (%d)": "论文上下文已移除（%d）",
+  "Loading conversation…": "正在加载对话…",
+  "Loaded %d messages": "已加载 %d 条消息",
+  "No messages found in the selected conversation": "选中的对话中没有消息",
+  "PDF upload failed.": "PDF 上传失败。",
+  "PDF page rendering failed.": "PDF 页面渲染失败。",
+  "This provider cannot read PDFs directly. Sending the Zotero PDF as page images.": "此服务商无法直接读取 PDF。正在将 Zotero PDF 作为页面图片发送。",
+  "Agent system unavailable": "Agent 系统不可用",
+  "Error: Agent system unavailable": "错误：Agent 系统不可用",
+  "Unknown action: %s": "未知操作：%s",
+  "Loading Claude commands…": "正在加载 Claude 命令…",
 };
 
 // ── Runtime state ────────────────────────────────────────────────────────────

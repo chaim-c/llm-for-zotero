@@ -8358,7 +8358,7 @@ export function setupHandlers(
               streaming: true,
             }]);
             refreshChatPreservingScroll();
-            if (status) setStatus(status, "Loading conversation…", "sending");
+            if (status) setStatus(status, t("Loading conversation…"), "sending");
 
             const { loadChatSession } = await import("../../webchat/client");
             resetWebChatPdfUploadedForCurrentConversation();
@@ -8380,12 +8380,12 @@ export function setupHandlers(
                   reasoningDetails: m.thinking || undefined,
                 });
               }
-              if (status) setStatus(status, `Loaded ${result.messages.length} messages`, "ready");
+              if (status) setStatus(status, tf("Loaded %d messages", result.messages.length), "ready");
             } else {
               if (status) {
                 setStatus(
                   status,
-                  "No messages found in the selected conversation",
+                  t("No messages found in the selected conversation"),
                   "ready",
                 );
               }
@@ -9153,7 +9153,7 @@ export function setupHandlers(
       return result.input;
     } catch (err) {
       ztoolkit.log(`LLM: failed to resolve /${actionName} input`, err);
-      if (status) setStatus(status, "Agent system unavailable", "error");
+      if (status) setStatus(status, t("Agent system unavailable"), "error");
       return null;
     }
   };
@@ -9252,7 +9252,7 @@ export function setupHandlers(
       await initAgentSubsystem();
     } catch (err) {
       ztoolkit.log("LLM: failed to init agent subsystem", err);
-      if (status) setStatus(status, `Error: Agent system unavailable`, "error");
+      if (status) setStatus(status, t("Error: Agent system unavailable"), "error");
       return;
     }
     const paperScopeProfile = getAgentApi().getPaperScopedActionProfile(action.name);
@@ -9614,13 +9614,13 @@ export function setupHandlers(
       await initAgentSubsystem();
       allActions = getAgentApi().listActions();
     } catch {
-      if (status) setStatus(status, "Agent system unavailable", "error");
+      if (status) setStatus(status, t("Agent system unavailable"), "error");
       return;
     }
 
     const action = allActions.find((a) => a.name === actionName);
     if (!action) {
-      if (status) setStatus(status, `Unknown action: ${actionName}`, "error");
+      if (status) setStatus(status, tf("Unknown action: %s", actionName), "error");
       return;
     }
 
@@ -11577,7 +11577,7 @@ export function setupHandlers(
               if (result) {
                 pdfUploadSystemMessages.push(result.systemMessageContent);
               } else {
-                if (status) setStatus(status, "PDF upload failed.", "error");
+                if (status) setStatus(status, t("PDF upload failed."), "error");
                 return;
               }
             } catch (err) {
@@ -11586,7 +11586,7 @@ export function setupHandlers(
                 pc.contextItemId,
                 err,
               );
-              if (status) setStatus(status, "PDF upload failed.", "error");
+              if (status) setStatus(status, t("PDF upload failed."), "error");
               return;
             }
           }
@@ -11594,7 +11594,7 @@ export function setupHandlers(
           if (status) {
             setStatus(
               status,
-              "This provider cannot read PDFs directly. Sending the Zotero PDF as page images.",
+              t("This provider cannot read PDFs directly. Sending the Zotero PDF as page images."),
               "warning",
             );
           }
@@ -11624,12 +11624,12 @@ export function setupHandlers(
               }
             } catch (err) {
               ztoolkit.log("LLM: Failed to render PDF pages for edit", pc.contextItemId, err);
-              if (status) setStatus(status, "PDF page rendering failed.", "error");
+              if (status) setStatus(status, t("PDF page rendering failed."), "error");
               return;
             }
           }
           if (!pdfPageImageDataUrls.length) {
-            if (status) setStatus(status, "PDF page rendering failed.", "error");
+            if (status) setStatus(status, t("PDF page rendering failed."), "error");
             return;
           }
         } else if (pdfSupport === "native") {
@@ -13360,7 +13360,7 @@ export function setupHandlers(
       if (status) {
         setStatus(
           status,
-          `Paper context removed (${nextPapers.length})`,
+          tf("Paper context removed (%d)", nextPapers.length),
           "ready",
         );
       }
